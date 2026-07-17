@@ -83,6 +83,11 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
             <div class="at-card-num"><?= $e($stats['last_inbound'] ? date('Y-m-d H:i', strtotime($stats['last_inbound'])) : '—') ?></div>
             <div class="at-card-lbl">Last Inbound Sync</div>
         </div>
+        <?php $ids = $stats['identities'] ?? array(); ?>
+        <div class="at-card" title="Company → Organization / Contact → User / Member → Agent identity links">
+            <div class="at-card-num"><?= (int) ($ids['companies'] ?? 0) ?> / <?= (int) ($ids['contacts'] ?? 0) ?> / <?= (int) ($ids['members'] ?? 0) ?></div>
+            <div class="at-card-lbl">Linked Companies / Contacts / Members</div>
+        </div>
     </section>
 
     <!-- Actions ------------------------------------------------------- -->

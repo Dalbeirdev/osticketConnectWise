@@ -140,6 +140,45 @@ class IdentityMap
         return ($res && ($r = db_fetch_array($res))) ? (int) $r['v'] : null;
     }
 
+    /**
+     * Bulk Member -> Staff identity sync (Resource Sync). For every normalized
+     * ConnectWise member, upsert an identity row; the osTicket staff link is
+     * resolved by EMAIL EQUALITY only, and may be null. IDENTITY ONLY — no
+     * ticket ownership is ever assigned from these rows.
+     *
+     * @param array<int,array<string,mixed>> $members Normalized members
+     *        (id, firstName, lastName, email) from ConnectWiseApi::getResources().
+     * @return int Number of members linked to an osTicket staff account.
+     */
+    public function syncMembers(array $members): int
+    {
+        // One pass over ost_staff builds the email -> staff_id index.
+        $staffByEmail = array();
+        $res = db_query('SELECT staff_id, email FROM ' . TABLE_PREFIX . 'staff', false);
+        while ($res && ($r = db_fetch_array($res))) {
+            $e = mb_strtolower(trim((string) $r['email']));
+            if ($e !== '') {
+                $staffByEmail[$e] = (int) $r['staff_id'];
+            }
+        }
+
+        $linked = 0;
+        foreach ($members as $m) {
+            $cwId = (int) ($m['id'] ?? 0);
+            if (!$cwId) {
+                continue;
+            }
+            $email   = mb_strtolower(trim((string) ($m['email'] ?? '')));
+            $staffId = $email !== '' ? ($staffByEmail[$email] ?? null) : null;
+            $name    = trim((string) ($m['firstName'] ?? '') . ' ' . (string) ($m['lastName'] ?? ''));
+            $this->mapMember($cwId, $staffId, $email, $name);
+            if ($staffId) {
+                $linked++;
+            }
+        }
+        return $linked;
+    }
+
     /* ----- Dashboard helpers ---------------------------------------------- */
 
     /**

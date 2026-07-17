@@ -131,6 +131,12 @@ $stuck = $q("SELECT COUNT(*) c FROM " . TABLE_PREFIX . "connectwise_sync_queue W
 t_check($stuck === 0, 'No jobs stuck in processing >30min', "$stuck stuck");
 $teFail = $q("SELECT COUNT(*) c FROM " . TABLE_PREFIX . "connectwise_time_entry WHERE status='failed'");
 $teFail === 0 ? t_pass('No failed time entries') : t_fail("$teFail failed time entrie(s) — see history popup / logs");
+$orgGone = $q('SELECT COUNT(*) c FROM ' . TABLE_PREFIX . 'connectwise_company_map m LEFT JOIN '
+    . TABLE_PREFIX . 'organization o ON o.id=m.osticket_org_id WHERE o.id IS NULL');
+t_check($orgGone === 0, 'Company map has no stale organization links', "$orgGone stale");
+$userGone = $q('SELECT COUNT(*) c FROM ' . TABLE_PREFIX . 'connectwise_contact_map m LEFT JOIN '
+    . TABLE_PREFIX . 'user u ON u.id=m.osticket_user_id WHERE u.id IS NULL');
+t_check($userGone === 0, 'Contact map has no stale user links', "$userGone stale");
 
 /* ----- L4 Live round-trip (opt-in) ------------------------------------------ */
 if ($liveId > 0) {

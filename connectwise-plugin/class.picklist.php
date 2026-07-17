@@ -29,12 +29,16 @@ class PicklistService
     /** @var Logger */      private $logger;
     /** @var int Client instance whose picklists this cache slice holds. */
     private $instanceId;
+    /** @var IdentityMap|null Member identity sync target (Resource Sync). */
+    private $identity;
 
-    public function __construct(ConnectWiseApi $api, Logger $logger, int $instanceId = 1)
+    public function __construct(ConnectWiseApi $api, Logger $logger, int $instanceId = 1,
+        ?IdentityMap $identity = null)
     {
         $this->api = $api;
         $this->logger = $logger;
         $this->instanceId = max(1, $instanceId);
+        $this->identity = $identity;
     }
 
     /**
@@ -66,7 +70,22 @@ class PicklistService
         // TimeEntries reference data (queried entities).
         $this->upsertRecords('TimeEntries', 'billingCodeID', $this->api->getBillingCodes(), 'name');
         $this->upsertRecords('TimeEntries', 'roleID',        $this->api->getRoles(),        'name');
-        $this->upsertRecords('TimeEntries', 'resourceID',    $this->api->getResources(),    null);
+        $members = $this->api->getResources();
+        $this->upsertRecords('TimeEntries', 'resourceID',    $members,    null);
+
+        // Resource Sync: refresh the Member -> Staff identity map from the
+        // same member list (email-equality links only; identity, never
+        // ownership). Rides the picklist TTL so it stays current for free.
+        if ($this->identity) {
+            try {
+                $linked = $this->identity->syncMembers($members);
+                $this->logger->debug("Member identity sync: $linked of " . count($members)
+                    . ' members linked to osTicket agents', array('category' => 'picklist'));
+            } catch (\Throwable $e) {
+                $this->logger->warning('Member identity sync failed: ' . $e->getMessage(),
+                    array('category' => 'picklist'));
+            }
+        }
 
         // Tickets picklists (status/priority/queue/type) from field metadata.
         try {

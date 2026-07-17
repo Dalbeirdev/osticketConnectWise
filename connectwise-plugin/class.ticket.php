@@ -180,6 +180,12 @@ class Ticket
                     if (!empty($contact['companyID'])) {
                         $companyId = (int) $contact['companyID'];
                     }
+                    // Contact Sync: persist the Contact -> User link for later
+                    // inbound attribution (identity map, per instance).
+                    if ($contactId && method_exists($osTicket, 'getOwnerId') && (int) $osTicket->getOwnerId()) {
+                        (new IdentityMap($this->instanceId))
+                            ->mapContact($contactId, (int) $osTicket->getOwnerId(), $email);
+                    }
                 }
             } catch (\Throwable $e) {
                 $logger->warning('Contact lookup failed for ' . $email . ': ' . $e->getMessage(),

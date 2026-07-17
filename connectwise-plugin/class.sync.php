@@ -37,14 +37,18 @@ class SyncEngine
     /** @var Ticket */      private $mapper;
     /** @var ConnectWiseApi */ private $api;
     /** @var Logger */      private $logger;
+    /** @var IdentityMap|null Identity links (Company/Contact/Member); optional. */
+    private $identity;
 
-    public function __construct(Settings $settings, Queue $queue, Ticket $mapper, ConnectWiseApi $api, Logger $logger)
+    public function __construct(Settings $settings, Queue $queue, Ticket $mapper, ConnectWiseApi $api, Logger $logger,
+        ?IdentityMap $identity = null)
     {
         $this->settings = $settings;
         $this->queue    = $queue;
         $this->mapper   = $mapper;
         $this->api      = $api;
         $this->logger   = $logger;
+        $this->identity = $identity;
     }
 
     /* ================================================================== */
@@ -722,11 +726,21 @@ class SyncEngine
             }
         }
 
-        // Client identity: attach the imported user to the client's osTicket
-        // Organization (auto-created from the client name) so queues can show
-        // an Organization column answering "whose ticket is this".
+        // Identity maps (Contact Sync): remember the Contact -> User link so
+        // later note attribution and outbound resolution skip the API.
+        if ($uid && $this->identity && !empty($at['contactID'])) {
+            $this->identity->mapContact((int) $at['contactID'], $uid, $email);
+        }
+
+        // Client identity (Company Sync): attach the imported user to the
+        // Organization for the ticket's ConnectWise COMPANY when known (mapped
+        // or auto-created from the company name), falling back to the client's
+        // own Organization — so queues can show an Organization column
+        // answering "whose ticket is this".
         if ($uid) {
-            $this->attachClientOrganization($uid);
+            if (!$this->attachCompanyOrganization($uid, (int) ($at['companyID'] ?? 0))) {
+                $this->attachClientOrganization($uid);
+            }
         }
 
         $vars = array(
@@ -1074,6 +1088,14 @@ class SyncEngine
      */
     private function osUserIdForContact(int $contactId): int
     {
+        // Identity-map fast path: a previously linked contact costs one
+        // indexed SELECT instead of an API round-trip.
+        if ($contactId && $this->identity) {
+            $mapped = $this->identity->userIdForContact($contactId);
+            if ($mapped) {
+                return $mapped;
+            }
+        }
         $c = $contactId ? $this->contactInfo($contactId) : null;
         if (!$c || $c['email'] === '' || !filter_var($c['email'], FILTER_VALIDATE_EMAIL)
             || !class_exists('User')) {
@@ -1081,7 +1103,11 @@ class SyncEngine
         }
         try {
             $u = \User::fromVars(array('name' => ($c['name'] ?: $c['email']), 'email' => $c['email']), true);
-            return $u ? (int) $u->getId() : 0;
+            $uid = $u ? (int) $u->getId() : 0;
+            if ($uid && $this->identity) {
+                $this->identity->mapContact($contactId, $uid, $c['email']);
+            }
+            return $uid;
         } catch (\Throwable $e) {
             return 0;
         }
@@ -1557,6 +1583,74 @@ class SyncEngine
      *
      * @param int $userId osTicket user id.
      */
+    /**
+     * Company Sync: attach an imported user to the osTicket Organization for a
+     * specific ConnectWise COMPANY. Uses the persistent company map first; on
+     * a miss, resolves the company name via the API, finds-or-creates the
+     * Organization by that name and records the link.
+     *
+     * @param int $userId
+     * @param int $cwCompanyId ConnectWise company id (0 = unknown).
+     * @return bool True when the user ended up attached to a company org
+     *              (caller falls back to the client organization otherwise).
+     */
+    private function attachCompanyOrganization(int $userId, int $cwCompanyId): bool
+    {
+        if (!$cwCompanyId || !$this->identity
+            || !class_exists('Organization') || !class_exists('User')) {
+            return false;
+        }
+        try {
+            $user = \User::lookup($userId);
+            if (!$user) {
+                return false;
+            }
+            // Already in an organization? Leave it alone — but report handled
+            // so the client-org fallback doesn't fight the existing link.
+            if (method_exists($user, 'getOrgId') && (int) $user->getOrgId() > 0) {
+                return true;
+            }
+
+            $org = null;
+            $orgId = $this->identity->orgIdForCompany($cwCompanyId);
+            if ($orgId) {
+                $org = \Organization::lookup($orgId);
+                // Stale map row (org deleted): fall through and re-resolve.
+            }
+
+            $companyName = '';
+            if (!$org) {
+                $co = $this->api->getCompany($cwCompanyId);
+                $companyName = trim((string) ($co['companyName'] ?? ''));
+                if ($companyName === '') {
+                    return false;
+                }
+                try {
+                    $q = \Organization::objects()->filter(array('name' => $companyName))->limit(1);
+                    foreach ($q as $o) { $org = $o; break; }
+                } catch (\Throwable $e) {
+                    $org = null;
+                }
+                if (!$org && method_exists('Organization', 'fromVars')) {
+                    $org = \Organization::fromVars(array('name' => $companyName));
+                }
+            }
+            if (!$org) {
+                return false;
+            }
+            $this->identity->mapCompany($cwCompanyId, (int) $org->getId(),
+                $companyName !== '' ? $companyName : (string) $org->getName());
+            if (method_exists($user, 'setOrganization')) {
+                $user->setOrganization($org, true);
+            }
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->warning('Company organization attach failed: ' . $e->getMessage(),
+                array('category' => 'inbound'));
+            return false;
+        }
+    }
+
     private function attachClientOrganization(int $userId): void
     {
         $orgName = trim($this->settings->clientName());

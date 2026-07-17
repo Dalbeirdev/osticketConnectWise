@@ -619,6 +619,8 @@ class ConnectWise
             'last_inbound'    => $settings->state('last_inbound_sync', null),
             'two_way'         => $settings->twoWayEnabled(),
             'interval'        => $settings->syncIntervalSeconds(),
+            // Identity maps (Company/Contact/Member links, per instance).
+            'identities'      => $this->c->identityMap()->counts(),
         );
     }
 

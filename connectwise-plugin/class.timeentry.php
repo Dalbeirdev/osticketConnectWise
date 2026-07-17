@@ -27,9 +27,12 @@ class TimeEntryService
     /** @var Ticket */          private $mapper;
     /** @var Logger */          private $logger;
     /** @var Audit */           private $audit;
+    /** @var IdentityMap|null Member identity links (Resource Sync); optional. */
+    private $identity;
 
     public function __construct(Settings $settings, Queue $queue, ConnectWiseApi $api,
-        PicklistService $picklists, Ticket $mapper, Logger $logger, Audit $audit)
+        PicklistService $picklists, Ticket $mapper, Logger $logger, Audit $audit,
+        ?IdentityMap $identity = null)
     {
         $this->settings  = $settings;
         $this->queue     = $queue;
@@ -38,6 +41,7 @@ class TimeEntryService
         $this->mapper    = $mapper;
         $this->logger    = $logger;
         $this->audit     = $audit;
+        $this->identity  = $identity;
     }
 
     /**
@@ -357,6 +361,14 @@ class TimeEntryService
      */
     private function resolveResourceId(int $staffId): ?int
     {
+        // Identity-map fast path (Resource Sync): a linked member costs one
+        // indexed SELECT — no API call, no KV round-trip.
+        if ($this->identity) {
+            $mapped = $this->identity->memberIdForStaff($staffId);
+            if ($mapped) {
+                return $mapped;
+            }
+        }
         $email = $this->staffEmail($staffId);
         if ($email !== '') {
             $key = 'res_email:' . mb_strtolower($email);
@@ -368,6 +380,10 @@ class TimeEntryService
                 $r = $this->api->getResourceByEmail($email);
                 if ($r && !empty($r['id'])) {
                     $this->settings->setState($key, (int) $r['id']);
+                    if ($this->identity) {
+                        $name = trim((string) ($r['firstName'] ?? '') . ' ' . (string) ($r['lastName'] ?? ''));
+                        $this->identity->mapMember((int) $r['id'], $staffId, $email, $name);
+                    }
                     return (int) $r['id'];
                 }
             } catch (\Throwable $e) {

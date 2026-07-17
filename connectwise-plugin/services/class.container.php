@@ -147,7 +147,8 @@ class Container
                 $this->queue(),
                 $this->mapper(),
                 $this->api(),
-                $this->logger()
+                $this->logger(),
+                $this->identityMap()
             ));
     }
 
@@ -160,7 +161,9 @@ class Container
     public function picklists(): PicklistService
     {
         return $this->instances['picklists']
-            ?? ($this->instances['picklists'] = new PicklistService($this->api(), $this->logger(), $this->instanceId()));
+            ?? ($this->instances['picklists'] = new PicklistService(
+                $this->api(), $this->logger(), $this->instanceId(), $this->identityMap()
+            ));
     }
 
     public function timeEntry(): TimeEntryService
@@ -173,7 +176,8 @@ class Container
                 $this->picklists(),
                 $this->mapper(),
                 $this->logger(),
-                $this->audit()
+                $this->audit(),
+                $this->identityMap()
             ));
     }
 
