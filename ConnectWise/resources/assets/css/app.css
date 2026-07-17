@@ -1,0 +1,9 @@
+/* Platform-specific styles layered over Bootstrap 5. */
+
+.card .fs-3 {
+    line-height: 1.1;
+}
+
+.navbar-brand .text-info {
+    letter-spacing: 0.5px;
+}

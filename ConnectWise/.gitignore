@@ -1,0 +1,8 @@
+/vendor/
+/.env
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/cache/*
+!/storage/cache/.gitkeep
+composer.lock
+.phpunit.result.cache
