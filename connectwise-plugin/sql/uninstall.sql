@@ -7,6 +7,11 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `ost_connectwise_company_map`;
+DROP TABLE IF EXISTS `ost_connectwise_contact_map`;
+DROP TABLE IF EXISTS `ost_connectwise_member_map`;
+DROP TABLE IF EXISTS `ost_connectwise_webhook_log`;
+DROP TABLE IF EXISTS `ost_connectwise_instance`;
 DROP TABLE IF EXISTS `ost_connectwise_conflict`;
 DROP TABLE IF EXISTS `ost_connectwise_import_filter`;
 DROP TABLE IF EXISTS `ost_connectwise_audit`;

@@ -124,6 +124,28 @@ queues, companies, resources, unassigned flag, date range, include-closed.
 Field-level conflicts awaiting resolution: `field`, `osticket_value`,
 `connectwise_value`, `resolution` (`unresolved`/`connectwise_wins`/`osticket_wins`/`manual`).
 
+## Identity maps + webhooks (migration 0008, schema 2.2.0)
+
+### `ost_connectwise_company_map`
+ConnectWise **Company → osTicket Organization** links, per instance.
+Unique (`instance_id`, `cw_company_id`); stores `osticket_org_id`,
+`company_name` snapshot.
+
+### `ost_connectwise_contact_map`
+ConnectWise **Contact → osTicket User** links, per instance.
+Unique (`instance_id`, `cw_contact_id`); stores `osticket_user_id`, `email`.
+
+### `ost_connectwise_member_map`
+ConnectWise **Member → osTicket Staff identity** links, per instance.
+`osticket_staff_id` is NULLABLE — a member row can exist with no matching
+agent. **Identity only: never used to auto-assign ticket ownership.**
+
+### `ost_connectwise_webhook_log`
+Receipt log for ConnectWise callbacks (future-ready; polling remains the
+authoritative sync trigger): `event_type`, `entity`, `entity_id`, raw
+`payload`, `signature` (shared-secret token), `status`
+(`received`/`processed`/`failed`/`ignored`), `error`, timestamps.
+
 ## Entity relationships
 
 ```

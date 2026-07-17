@@ -23,6 +23,8 @@ use ConnectWise\Scheduler;
 use ConnectWise\Audit;
 use ConnectWise\PicklistService;
 use ConnectWise\TimeEntryService;
+use ConnectWise\IdentityMap;
+use ConnectWise\WebhookService;
 
 if (!defined('INCLUDE_DIR')) {
     die('Access denied');
@@ -173,6 +175,28 @@ class Container
                 $this->logger(),
                 $this->audit()
             ));
+    }
+
+    /**
+     * Identity links (Company->Organization, Contact->User, Member->Staff)
+     * scoped to this container's client instance.
+     */
+    public function identityMap(): IdentityMap
+    {
+        return $this->instances['identityMap']
+            ?? ($this->instances['identityMap'] = new IdentityMap(
+                $this->instance ? $this->instance->id() : null
+            ));
+    }
+
+    /**
+     * Webhook (callback) receipt log + processing hook. Future-ready stub:
+     * polling remains the authoritative sync trigger.
+     */
+    public function webhooks(): WebhookService
+    {
+        return $this->instances['webhooks']
+            ?? ($this->instances['webhooks'] = new WebhookService($this->logger(), $this->instanceId()));
     }
 
     /**

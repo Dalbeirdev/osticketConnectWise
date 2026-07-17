@@ -20,7 +20,7 @@ if (!defined('INCLUDE_DIR')) {
 class Installer
 {
     /** Bump when shipping new migration files (cheap upgrade detector). */
-    const SCHEMA_VERSION = '2.1.2';
+    const SCHEMA_VERSION = '2.2.0';
 
     /**
      * Ensure the schema exists and all migrations are applied.
@@ -191,6 +191,10 @@ class Installer
     {
         $prefix = self::prefix();
         $tables = array(
+            'connectwise_company_map',
+            'connectwise_contact_map',
+            'connectwise_member_map',
+            'connectwise_webhook_log',
             'connectwise_instance',
             'connectwise_conflict',
             'connectwise_import_filter',

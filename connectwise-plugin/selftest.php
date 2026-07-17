@@ -46,12 +46,13 @@ t_check($plugin !== null, 'Plugin installed & bootstrapped');
 if (!$plugin) { goto summary; }
 $gcfg = $plugin->globalConfig();
 t_check((string) $gcfg->get('schema_version') !== '', 'Config namespace resolved (schema_version=' . $gcfg->get('schema_version') . ')');
-foreach (array('connectwise_instance', 'connectwise_ticket_map', 'connectwise_sync_queue', 'connectwise_note_map', 'connectwise_time_entry') as $tbl) {
+foreach (array('connectwise_instance', 'connectwise_ticket_map', 'connectwise_sync_queue', 'connectwise_note_map', 'connectwise_time_entry',
+               'connectwise_company_map', 'connectwise_contact_map', 'connectwise_member_map', 'connectwise_webhook_log') as $tbl) {
     t_check(\ConnectWise\Installer::tableExists($tbl), "Table $tbl exists");
 }
 $res = db_query('SELECT COUNT(*) c FROM ' . TABLE_PREFIX . 'connectwise_migrations');
 $mig = ($res && ($r = db_fetch_array($res))) ? (int) $r['c'] : 0;
-t_check($mig >= 6, "Migrations applied ($mig >= 6)");
+t_check($mig >= 8, "Migrations applied ($mig >= 8)");
 
 /* ----- L2 Configuration (per client) --------------------------------------- */
 $repo = new \ConnectWise\InstanceRepository();
