@@ -49,6 +49,30 @@
 | Panel/dropdown changes don't appear | Stale `scp/` endpoint copies | Re-copy per INSTALLATION.md §2b, then Ctrl+F5. |
 | osTicket-side entries attributed to the default resource in ConnectWise | Ticket unassigned in ConnectWise | Assign the ticket in ConnectWise — entries follow the assigned resource. |
 
+## Host osTicket issues (not caused by this plugin)
+
+**Fatal `class_exists(): Argument #1 ($class) must be of type string, array
+given` in `include/class.list.php` on the ticket queue or ticket view.**
+
+Seen on osTicket trees carrying the time-tracking/billing core mod. That mod
+appends a `time-type` list to `include/i18n/en_US/list.yaml` but indents it
+*under* the ticket-status entry's `configuration: handler:` key. YAML then
+parses the whole block **as the handler value**, so a **fresh install** stores
+`{"handler":[{...}]}` instead of `{"handler":"TicketStatusList"}` and
+`DynamicList::lookup()` calls `class_exists(array)` — fatal on PHP 8.
+Databases installed *before* that edit are unaffected.
+
+Repair the data (no core change needed):
+
+```sql
+UPDATE ost_list SET configuration = '{"handler":"TicketStatusList"}'
+ WHERE type = 'ticket-status';
+```
+
+To stop it recurring on future installs, remove (or correctly de-indent) that
+appended block in `list.yaml`. The Time Type list itself is provisioned by
+`deploy/timebill-schema.sql`, so nothing is lost by removing it.
+
 ## Performance
 
 - Lower **Batch Size** if a single run times out.
