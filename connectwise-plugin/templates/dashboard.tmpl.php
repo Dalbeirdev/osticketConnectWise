@@ -42,6 +42,7 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
             </form>
             <?php endif; ?>
             <a class="at-btn" href="connectwise.php?view=clients">Clients</a>
+            <a class="at-btn" href="connectwise.php?view=clients&amp;mode=add">+ Add Client</a>
             <span class="at-badge <?= $stats['enabled'] ? 'on' : 'off' ?>">
                 <?= $stats['enabled'] ? 'Enabled' : 'Disabled' ?>
             </span>
@@ -59,6 +60,19 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
     <?php endif; ?>
     <?php if (!empty($error)): ?>
         <div class="at-alert at-error"><?= $e($error) ?></div>
+    <?php endif; ?>
+
+    <!-- First-run call to action: nothing syncs until a tenant exists. -->
+    <?php if (empty($instances)): ?>
+    <section class="at-box" style="border-left:4px solid #1f6feb">
+        <div class="at-box-h">
+            <span class="at-ico" style="background:#1f6feb"><i class="icon-briefcase"></i></span>
+            <div><h2>No ConnectWise client registered yet</h2>
+                <div class="at-box-sub">Register the client's ConnectWise tenant to start syncing &mdash;
+                    you'll need its Company ID + Public Key, Private Key, API Client ID and Site URL.</div></div>
+        </div>
+        <a class="at-btn" href="connectwise.php?view=clients&amp;mode=add">+ Add Client</a>
+    </section>
     <?php endif; ?>
 
     <!-- KPI cards ----------------------------------------------------- -->
