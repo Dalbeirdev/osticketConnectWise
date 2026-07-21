@@ -140,6 +140,20 @@ ConnectWise **Member → osTicket Staff identity** links, per instance.
 `osticket_staff_id` is NULLABLE — a member row can exist with no matching
 agent. **Identity only: never used to auto-assign ticket ownership.**
 
+## Performance indexes (migration 0009, schema 2.3.0)
+
+Added for specific hot-path queries that previously scanned:
+
+| Index | Serves |
+|---|---|
+| `time_entry (osticket_ticket_id)` | panel / time-history listing (had no usable index) |
+| `time_entry (ticket_map_id, connectwise_time_entry_id)` | covering index for the inbound echo guard |
+| `note_map (ticket_map_id, note_type)` | attachment + time-entry dedupe reads |
+| `log (category, created)` | dashboard "API calls (24h)" |
+| `log (level, id)` | dashboard "last error" |
+| `sync_history (entity_type, status)` | dashboard imported/exported split |
+| `picklist_cache (instance_id, field, value)` | label/value lookups that omit `entity` |
+
 ### `ost_connectwise_webhook_log`
 Receipt log for ConnectWise callbacks (future-ready; polling remains the
 authoritative sync trigger): `event_type`, `entity`, `entity_id`, raw

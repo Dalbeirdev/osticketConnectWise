@@ -156,8 +156,15 @@ class TimeEntryService
         $prefix = Installer::prefix();
         $id = (int) $ostId;
         $rows = array();
+        // Member labels come from the picklist cache via a JOIN — this used to
+        // issue one extra query per imported row (N+1 on every panel render).
         $res = db_query(
-            "SELECT * FROM `{$prefix}connectwise_time_entry` WHERE osticket_ticket_id=$id ORDER BY id DESC LIMIT 100"
+            "SELECT te.*, pc.label AS resource_label "
+            . "FROM `{$prefix}connectwise_time_entry` te "
+            . "LEFT JOIN `{$prefix}connectwise_picklist_cache` pc "
+            . "ON pc.instance_id = te.instance_id AND pc.field = 'resourceID' "
+            . "AND pc.value = CAST(te.resource_id AS CHAR) "
+            . "WHERE te.osticket_ticket_id=$id ORDER BY te.id DESC LIMIT 100"
         );
         if ($res) {
             while ($row = db_fetch_array($res)) {
@@ -170,14 +177,8 @@ class TimeEntryService
                 } else {
                     $row['source'] = 'ConnectWise';
                     $row['tech']   = 'ConnectWise';
-                    if (!empty($row['resource_id'])) {
-                        $r2 = db_query("SELECT label FROM `{$prefix}connectwise_picklist_cache` "
-                            . 'WHERE instance_id=' . (int) ($row['instance_id'] ?? 1)
-                            . " AND field='resourceID' AND value="
-                            . db_input((string) (int) $row['resource_id']) . ' LIMIT 1', false);
-                        if ($r2 && ($x2 = db_fetch_array($r2)) && trim((string) $x2['label']) !== '') {
-                            $row['tech'] = trim((string) $x2['label']);
-                        }
+                    if (!empty($row['resource_id']) && trim((string) ($row['resource_label'] ?? '')) !== '') {
+                        $row['tech'] = trim((string) $row['resource_label']);
                     }
                 }
                 $rows[] = $row;

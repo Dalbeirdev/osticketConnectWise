@@ -52,7 +52,7 @@ foreach (array('connectwise_instance', 'connectwise_ticket_map', 'connectwise_sy
 }
 $res = db_query('SELECT COUNT(*) c FROM ' . TABLE_PREFIX . 'connectwise_migrations');
 $mig = ($res && ($r = db_fetch_array($res))) ? (int) $r['c'] : 0;
-t_check($mig >= 8, "Migrations applied ($mig >= 8)");
+t_check($mig >= 9, "Migrations applied ($mig >= 9)");
 
 /* ----- L2 Configuration (per client) --------------------------------------- */
 $repo = new \ConnectWise\InstanceRepository();

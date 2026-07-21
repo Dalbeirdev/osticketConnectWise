@@ -1342,7 +1342,12 @@ class SyncEngine
         try {
             $seen = array();
             $p2 = Installer::prefix();
-            $r0 = db_query("SELECT connectwise_time_entry_id FROM `{$p2}connectwise_time_entry` WHERE connectwise_time_entry_id IS NOT NULL");
+            // Scoped to THIS ticket's mapping: a ConnectWise time entry belongs
+            // to exactly one ticket, so the global read this used to do loaded
+            // every row in the table into memory on every ticket synced.
+            $r0 = db_query("SELECT connectwise_time_entry_id FROM `{$p2}connectwise_time_entry` "
+                . 'WHERE ticket_map_id=' . (int) $map['id']
+                . ' AND connectwise_time_entry_id IS NOT NULL', false);
             while ($r0 && ($row0 = db_fetch_array($r0))) { $seen[(int) $row0['connectwise_time_entry_id']] = true; }
             // Plus time entries already IMPORTED (ID-based dedupe, like notes).
             $r0 = db_query("SELECT connectwise_note_id FROM `{$p2}connectwise_note_map` "

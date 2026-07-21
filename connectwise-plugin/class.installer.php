@@ -20,7 +20,7 @@ if (!defined('INCLUDE_DIR')) {
 class Installer
 {
     /** Bump when shipping new migration files (cheap upgrade detector). */
-    const SCHEMA_VERSION = '2.2.0';
+    const SCHEMA_VERSION = '2.3.0';
 
     /**
      * Ensure the schema exists and all migrations are applied.
