@@ -1163,19 +1163,24 @@ class SyncEngine
             return;
         }
         try {
-            $mapRow = $this->mapper->findByOsticketId((int) $osTicket->getId());
-            $iid = (int) ($mapRow['instance_id'] ?? 1);
-            $prefix = Installer::prefix();
-            $r = db_query("SELECT label FROM `{$prefix}connectwise_picklist_cache` "
-                . "WHERE instance_id=$iid AND field='priority' AND value="
-                . db_input((string) (int) $at['priority']) . ' LIMIT 1', false);
-            $label = ($r && ($x = db_fetch_array($r))) ? mb_strtolower(trim((string) $x['label'])) : '';
-            if ($label === '') {
-                return;
+            // Admin-configured Priority Map wins over automatic name parity.
+            $rev  = $this->settings->priorityMapReverse();
+            $want = $rev[(int) $at['priority']] ?? '';
+            if ($want === '') {
+                $mapRow = $this->mapper->findByOsticketId((int) $osTicket->getId());
+                $iid = (int) ($mapRow['instance_id'] ?? 1);
+                $prefix = Installer::prefix();
+                $r = db_query("SELECT label FROM `{$prefix}connectwise_picklist_cache` "
+                    . "WHERE instance_id=$iid AND field='priority' AND value="
+                    . db_input((string) (int) $at['priority']) . ' LIMIT 1', false);
+                $label = ($r && ($x = db_fetch_array($r))) ? mb_strtolower(trim((string) $x['label'])) : '';
+                if ($label === '') {
+                    return;
+                }
+                $syn = array('medium' => 'normal', 'critical' => 'emergency',
+                    'urgent' => 'high', 'information' => 'low');
+                $want = $syn[$label] ?? $label;
             }
-            $syn = array('medium' => 'normal', 'critical' => 'emergency',
-                'urgent' => 'high', 'information' => 'low');
-            $want = $syn[$label] ?? $label;
             $r = db_query('SELECT priority_id, priority_desc FROM ' . TABLE_PREFIX
                 . 'ticket_priority WHERE LOWER(priority_desc)=' . db_input($want)
                 . ' OR LOWER(priority)=' . db_input($want) . ' LIMIT 1', false);

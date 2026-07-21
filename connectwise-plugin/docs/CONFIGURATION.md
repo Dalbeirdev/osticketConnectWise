@@ -66,6 +66,7 @@ member and work role are validated by `selftest.php`.
 | Require time before close | Closures without time are flagged in the audit log. |
 | Close osTicket on Complete | ConnectWise Complete closes the osTicket copy. |
 | Status Map | **Leave empty.** Name parity (§4) handles everything; map lines (`Name=ID`) exist only for deliberate overrides. |
+| Priority Map | Optional lines `osTicket Priority Name=CW priority ID` (both directions). Empty = automatic name matching with the Medium↔Normal / Critical↔Emergency synonym bridge. |
 
 ---
 

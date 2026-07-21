@@ -307,6 +307,12 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                 <textarea name="o_status_map" class="at-fld" rows="4"
                     placeholder="Open=201&#10;In Progress=202&#10;Resolved=205&#10;Closed=205"><?= $e($opt('status_map')) ?></textarea>
             </div>
+            <div style="margin-top:12px">
+                <label class="at-lbl">Priority Map &mdash; one per line: <code>osTicket Priority Name=ConnectWise priority ID</code>
+                    <span class="at-muted">(optional; empty = automatic name matching with Medium&harr;Normal, Critical&harr;Emergency synonyms. See the ID reference for this tenant's priority IDs.)</span></label>
+                <textarea name="o_priority_map" class="at-fld" rows="4"
+                    placeholder="Emergency=1&#10;High=2&#10;Normal=4&#10;Low=6"><?= $e($opt('priority_map')) ?></textarea>
+            </div>
         </section>
 
         <section class="at-box">

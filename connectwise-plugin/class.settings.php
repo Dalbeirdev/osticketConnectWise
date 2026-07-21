@@ -308,6 +308,46 @@ class Settings
         return $out;
     }
 
+    /**
+     * Parse the per-client "osTicket Priority Name=ConnectWise priority id"
+     * map (same line format as the Status Map). Empty = automatic name
+     * parity with the built-in synonym bridge.
+     *
+     * @return array<string,int> lowercased osTicket priority name => CW priority id
+     */
+    public function priorityMap(): array
+    {
+        $raw = (string) $this->config->get('priority_map');
+        $map = array();
+        foreach (preg_split('/\r\n|\r|\n/', $raw) as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '=') === false) {
+                continue;
+            }
+            list($label, $id) = array_map('trim', explode('=', $line, 2));
+            if ($label !== '' && is_numeric($id)) {
+                $map[mb_strtolower($label)] = (int) $id;
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * Reverse priority map for inbound sync; FIRST line per CW value wins.
+     *
+     * @return array<int,string> CW priority id => lowercased osTicket priority name
+     */
+    public function priorityMapReverse(): array
+    {
+        $out = array();
+        foreach ($this->priorityMap() as $name => $cwId) {
+            if (!isset($out[$cwId])) {
+                $out[$cwId] = $name;
+            }
+        }
+        return $out;
+    }
+
     /** Client display name (set for instance-bound settings; '' for legacy). */
     public function clientName(): string
     {

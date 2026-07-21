@@ -94,6 +94,7 @@ $optionTypes = array(
     'require_time_before_close'  => 'bool',
     'close_osticket_on_complete' => 'bool',
     'status_map'                 => 'str',
+    'priority_map'               => 'str',
     'sync_attachments'           => 'bool',
     'import_system_notes'        => 'bool',
     'dept_map'                   => 'deptmap',

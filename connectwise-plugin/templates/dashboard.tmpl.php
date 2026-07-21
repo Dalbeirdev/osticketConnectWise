@@ -83,12 +83,31 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
             <div class="at-card-num"><?= $e($stats['last_inbound'] ? date('Y-m-d H:i', strtotime($stats['last_inbound'])) : '—') ?></div>
             <div class="at-card-lbl">Last Inbound Sync</div>
         </div>
+        <div class="at-card">
+            <div class="at-card-num"><?= $e(!empty($stats['next_sync']) ? date('Y-m-d H:i', strtotime($stats['next_sync'])) : '—') ?></div>
+            <div class="at-card-lbl">Next Sync (est.)</div>
+        </div>
+        <div class="at-card" title="Successful ticket syncs by direction">
+            <div class="at-card-num"><?= (int) ($stats['tickets']['imported'] ?? 0) ?> / <?= (int) ($stats['tickets']['exported'] ?? 0) ?></div>
+            <div class="at-card-lbl">Imported / Exported Tickets</div>
+        </div>
+        <div class="at-card">
+            <div class="at-card-num"><?= (int) ($stats['api_calls_24h'] ?? 0) ?></div>
+            <div class="at-card-lbl">API Calls (24h)</div>
+        </div>
         <?php $ids = $stats['identities'] ?? array(); ?>
         <div class="at-card" title="Company → Organization / Contact → User / Member → Agent identity links">
             <div class="at-card-num"><?= (int) ($ids['companies'] ?? 0) ?> / <?= (int) ($ids['contacts'] ?? 0) ?> / <?= (int) ($ids['members'] ?? 0) ?></div>
             <div class="at-card-lbl">Linked Companies / Contacts / Members</div>
         </div>
     </section>
+
+    <?php if (!empty($stats['last_error']['message'])): ?>
+    <div class="at-alert at-error" style="margin-top:10px" title="<?= $e($stats['last_error']['created']) ?>">
+        <strong>Last error</strong> (<?= $e($stats['last_error']['created']) ?>):
+        <?= $e(mb_strimwidth((string) $stats['last_error']['message'], 0, 220, '…')) ?>
+    </div>
+    <?php endif; ?>
 
     <!-- Actions ------------------------------------------------------- -->
     <section class="at-actions">

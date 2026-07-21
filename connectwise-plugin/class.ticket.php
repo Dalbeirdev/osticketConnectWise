@@ -232,9 +232,14 @@ class Ticket
     }
 
     /**
-     * Map an osTicket priority to a sensible ConnectWise priority picklist value.
-     * ConnectWise defaults: 1=High,2=Medium,3=Low,4=Critical (varies per tenant).
-     * Admins can override globally via default_priority.
+     * Map an osTicket priority to a ConnectWise priority id.
+     *
+     * Resolution order:
+     *  1. Admin-configured Priority Map ("osTicket Priority Name=CW id").
+     *  2. Keyword heuristic against common priority id conventions
+     *     (tenant-specific — the map above is the reliable path).
+     * The per-client default_priority (when set) short-circuits BEFORE this
+     * method is consulted (see buildConnectWiseFields()).
      */
     public function mapPriority(\Ticket $osTicket): int
     {
@@ -246,6 +251,10 @@ class Ticket
             } elseif (is_string($prio)) {
                 $p = strtolower($prio);
             }
+        }
+        $map = $this->settings->priorityMap();
+        if ($p !== '' && isset($map[$p])) {
+            return $map[$p];
         }
         if (strpos($p, 'emerg') !== false || strpos($p, 'critical') !== false) {
             return 4;

@@ -607,6 +607,44 @@ class ConnectWise
         $lastTest = $settings->state('last_connection_test', null);
         $lastSync = $settings->state('last_sync_summary', null);
 
+        // Ticket import/export split (successful ticket syncs by direction).
+        $tickets = array('imported' => 0, 'exported' => 0);
+        $res = db_query("SELECT direction, COUNT(*) c FROM `{$prefix}connectwise_sync_history` "
+            . "WHERE entity_type='ticket' AND status='success' GROUP BY direction", false);
+        while ($res && ($r = db_fetch_array($res))) {
+            if ($r['direction'] === 'to_osticket') {
+                $tickets['imported'] = (int) $r['c'];
+            } elseif ($r['direction'] === 'to_connectwise') {
+                $tickets['exported'] = (int) $r['c'];
+            }
+        }
+
+        // API calls in the last 24h (log category 'api', all levels).
+        $apiCalls = 0;
+        $res = db_query("SELECT COUNT(*) c FROM `{$prefix}connectwise_log` "
+            . "WHERE category='api' AND created > (NOW() - INTERVAL 1 DAY)", false);
+        if ($res && ($r = db_fetch_array($res))) {
+            $apiCalls = (int) $r['c'];
+        }
+
+        // Most recent error (message + when) for the Last Error tile.
+        $lastError = null;
+        $res = db_query("SELECT message, created FROM `{$prefix}connectwise_log` "
+            . "WHERE level='error' ORDER BY id DESC LIMIT 1", false);
+        if ($res && ($r = db_fetch_array($res))) {
+            $lastError = array('message' => (string) $r['message'], 'created' => (string) $r['created']);
+        }
+
+        // Next scheduled inbound run (last inbound + configured interval).
+        $lastInbound = $settings->state('last_inbound_sync', null);
+        $nextSync = null;
+        if (is_string($lastInbound) && $lastInbound !== '') {
+            $ts = strtotime($lastInbound);
+            if ($ts) {
+                $nextSync = gmdate('c', $ts + $settings->syncIntervalSeconds());
+            }
+        }
+
         return array(
             'enabled'         => $settings->isEnabled(),
             'configured'      => Settings::isConfigured($settings->raw()),
@@ -616,9 +654,13 @@ class ConnectWise
             'failed_syncs'    => $queue['failed'] + $queue['dead'] + $hist['failed'],
             'history'         => $hist,
             'last_sync'       => $lastSync,
-            'last_inbound'    => $settings->state('last_inbound_sync', null),
+            'last_inbound'    => $lastInbound,
+            'next_sync'       => $nextSync,
             'two_way'         => $settings->twoWayEnabled(),
             'interval'        => $settings->syncIntervalSeconds(),
+            'tickets'         => $tickets,
+            'api_calls_24h'   => $apiCalls,
+            'last_error'      => $lastError,
             // Identity maps (Company/Contact/Member links, per instance).
             'identities'      => $this->c->identityMap()->counts(),
         );
