@@ -1,0 +1,3 @@
+
+# Deployment artifacts — contain DB dump (password hashes + SECRET_SALT). Never commit.
+_deploy-hostinger/
