@@ -1257,9 +1257,14 @@ class SyncEngine
         $sinceUtc = $this->toUtc($since);
 
         // Our own exported notes, identified by id (invisible loop prevention).
+        // Scope to NOTE-type rows only: ConnectWise note ids, time-entry ids and
+        // document ids are separate id-spaces that can collide numerically, so an
+        // unscoped read would let a stored time-entry/attachment id suppress a
+        // real note with the same id (silent missed-note import).
         $known = array();
         $pfx = Installer::prefix();
-        $rk = db_query("SELECT connectwise_note_id FROM `{$pfx}connectwise_note_map` WHERE ticket_map_id=" . (int) $map['id'], false);
+        $rk = db_query("SELECT connectwise_note_id FROM `{$pfx}connectwise_note_map` "
+            . 'WHERE ticket_map_id=' . (int) $map['id'] . " AND note_type IN ('note','reply')", false);
         while ($rk && ($kk = db_fetch_array($rk))) { $known[(int) $kk['connectwise_note_id']] = true; }
 
         // ConnectWise SYSTEM notes (workflow/forwarding/assignment noise) are
