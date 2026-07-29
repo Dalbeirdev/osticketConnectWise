@@ -561,7 +561,22 @@ class SyncEngine
             }
         }
 
-        // Advance the discovery cursor.
+        // Advance the discovery cursor. When we filled the batch, tickets that
+        // share maxSeen's exact timestamp may lie just beyond the boundary and
+        // would be skipped forever by the next run's strict ">" filter. Rewind
+        // one second so they are re-examined next run; the idempotent enqueue
+        // dedupe keys make the small overlap harmless. The rewind is only
+        // applied while it still keeps the cursor ahead of its old value, so the
+        // producer can never stall or move backwards.
+        if (count($tickets) >= $batch) {
+            $ts = strtotime($maxSeen);
+            if ($ts) {
+                $rewound = gmdate('Y-m-d\TH:i:s\Z', $ts - 1);
+                if ($rewound > $cursor) {
+                    $maxSeen = $rewound;
+                }
+            }
+        }
         $this->settings->setState('inbound_cursor_utc', $maxSeen);
         $this->settings->setState('last_inbound_sync', gmdate('c'));
         $this->logger->info('Inbound producer: examined ' . count($tickets) . ", queued $queued job(s)",
