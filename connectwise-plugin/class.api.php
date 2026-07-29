@@ -276,8 +276,8 @@ class ConnectWiseApi
      */
     public function getTicket(int $id): ?array
     {
-        $t = $this->request('GET', "service/tickets/$id");
-        if (empty($t['id'])) {
+        $t = $this->getByIdOrNull("service/tickets/$id");
+        if (!$t || empty($t['id'])) {
             return null;
         }
         $ticket = $this->normalizeTicket($t);
@@ -506,8 +506,8 @@ class ConnectWiseApi
      */
     public function getContact(int $id): ?array
     {
-        $c = $this->request('GET', "company/contacts/$id");
-        return !empty($c['id']) ? $this->normalizeContact($c) : null;
+        $c = $this->getByIdOrNull("company/contacts/$id");
+        return ($c && !empty($c['id'])) ? $this->normalizeContact($c) : null;
     }
 
     /**
@@ -516,8 +516,8 @@ class ConnectWiseApi
      */
     public function getCompany(int $id): ?array
     {
-        $c = $this->request('GET', "company/companies/$id");
-        if (empty($c['id'])) {
+        $c = $this->getByIdOrNull("company/companies/$id");
+        if (!$c || empty($c['id'])) {
             return null;
         }
         return array(
@@ -557,8 +557,8 @@ class ConnectWiseApi
      */
     public function getContract(int $id): ?array
     {
-        $a = $this->request('GET', "finance/agreements/$id");
-        if (empty($a['id'])) {
+        $a = $this->getByIdOrNull("finance/agreements/$id");
+        if (!$a || empty($a['id'])) {
             return null;
         }
         return array(
@@ -1080,6 +1080,26 @@ class ConnectWiseApi
         } while ($attempt < 2);
 
         return $this->handleResponse($method, $url, $resp);
+    }
+
+    /**
+     * GET a single record, returning null on 404 instead of throwing.
+     * ConnectWise returns 404 for a missing id, which is a valid "not found"
+     * for by-id lookups (deleted/renamed company, removed contact, etc.), not
+     * an error. Any other failure still throws.
+     *
+     * @return array|null
+     */
+    private function getByIdOrNull(string $path): ?array
+    {
+        try {
+            return $this->request('GET', $path);
+        } catch (ApiException $e) {
+            if ($e->getHttpStatus() === 404) {
+                return null;
+            }
+            throw $e;
+        }
     }
 
     /**
