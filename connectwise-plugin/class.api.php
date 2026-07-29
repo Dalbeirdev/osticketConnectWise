@@ -593,11 +593,20 @@ class ConnectWiseApi
         if (!empty($fields['roleID'])) {
             $body['workRole'] = array('id' => (int) $fields['roleID']);
         }
+        // Time window. Many ConnectWise tenants enforce "require start and end
+        // time on time entries" and REJECT an actualHours-only post with
+        // "The timeStart field is required" (verified against a live tenant).
+        // Always send a valid timeStart/timeEnd: use the caller's window when
+        // given, otherwise derive one ending now from hoursWorked. CW computes
+        // actualHours from the window.
         if (!empty($fields['startDateTime']) && !empty($fields['endDateTime'])) {
             $body['timeStart'] = $this->isoUtc((string) $fields['startDateTime']);
             $body['timeEnd']   = $this->isoUtc((string) $fields['endDateTime']);
         } elseif (!empty($fields['hoursWorked'])) {
-            $body['actualHours'] = (float) $fields['hoursWorked'];
+            $secs  = max(60, (int) round(((float) $fields['hoursWorked']) * 3600));
+            $endTs = time();
+            $body['timeStart'] = gmdate('Y-m-d\TH:i:s\Z', $endTs - $secs);
+            $body['timeEnd']   = gmdate('Y-m-d\TH:i:s\Z', $endTs);
         }
         if (!empty($fields['summaryNotes'])) {
             $body['notes'] = (string) $fields['summaryNotes'];
