@@ -261,6 +261,30 @@ header('Cache-Control: no-cache');
         document.addEventListener('keydown', onKey);
         document.body.appendChild(ov);
     }
+    /* ConnectWise ticket details + time summary, opened on demand as a popup. */
+    function showDetails(ctx, infoRows, tsBody) {
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+        var CARD = 'background:#fff;border-radius:12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#2b2f33;width:min(660px,94vw);max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)';
+        var HEAD = 'background:linear-gradient(180deg,#f7fafc,#eef3f8);border-bottom:1px solid #dfe6ec;padding:11px 14px;font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#51606e;display:flex;align-items:center';
+        var wrap = document.createElement('div');
+        wrap.style.cssText = CARD;
+        wrap.innerHTML =
+            '<div style="' + HEAD + '"><span>&#128203; ConnectWise Ticket #' + esc(ctx.connectwise_ticket_number || '') + '</span>'
+            + '<button type="button" class="at-dx" aria-label="Close" style="margin-left:auto;border:none;background:none;font-size:22px;line-height:1;cursor:pointer;color:#8a949e">&times;</button></div>'
+            + '<div style="display:grid;grid-template-columns:1fr 210px">'
+            +   '<div style="border-right:1px solid #eef1f4">' + infoRows + '</div>'
+            +   '<div><div style="' + HEAD + ';border-left:0">&#9201; Time Summary</div>' + tsBody + '</div>'
+            + '</div>'
+            + (ctx.deep_link ? '<div style="padding:11px 14px;border-top:1px solid #eef1f4"><a href="' + esc(ctx.deep_link) + '" target="_blank" rel="noopener" class="no-pjax" style="color:#1f6feb;font-weight:700;text-decoration:none">Open in ConnectWise &#8599;</a></div>' : '');
+        ov.appendChild(wrap);
+        function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+        function onKey(e) { if (e.key === 'Escape') close(); }
+        ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+        wrap.querySelector('.at-dx').onclick = close;
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(ov);
+    }
 
     function buildWidget(TID, ctx, form) {
         var box = document.createElement('div');
@@ -374,28 +398,24 @@ header('Cache-Control: no-cache');
                 +   '<div style="color:#8a949e;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Estimated</div></div>'
                 + '</div>'
                 + (over ? '<div style="padding:6px 12px;background:#fdf1f0;color:#c0392b;font-size:11px;border-top:1px solid #f4d7d4">&#9888; Worked exceeds estimate</div>' : '');
-            if (window.innerWidth >= 1500 && has) {
-                var left = document.createElement('div');
-                left.className = 'at-panel at-cw-detail';
-                left.style.cssText = CARD + ';position:fixed;left:14px;top:120px;width:225px;max-height:72vh;overflow:auto;z-index:90';
-                left.innerHTML = '<div style="' + HEAD + '">&#128203; ConnectWise Ticket</div>' + infoRows;
-                document.body.appendChild(left);
-                var right = document.createElement('div');
-                right.className = 'at-panel at-cw-detail';
-                right.style.cssText = CARD + ';position:fixed;right:14px;top:120px;width:215px;z-index:90';
-                right.innerHTML = '<div style="' + HEAD + '">&#9201; Time Summary</div>' + tsBody
-                    + '<div style="padding:8px 12px;border-top:1px solid #f2f5f8;font-size:10.5px;color:#8a949e">Live from ConnectWise #' + esc(ctx.connectwise_ticket_number || '') + '</div>';
-                document.body.appendChild(right);
-            } else if (has) {
-                var inln = document.createElement('div');
-                inln.className = 'at-panel at-cw-detail';
-                inln.style.cssText = CARD + ';margin:10px 0';
-                var grid = infoRows.split('</div></div>').filter(Boolean).map(function (s) { return s + '</div></div>'; });
-                inln.innerHTML = '<div style="' + HEAD + '">&#128203; ConnectWise Ticket &nbsp;&middot;&nbsp; &#9201; '
-                    + worked.toFixed(2) + ' h worked / ' + est.toFixed(2) + ' h estimated</div>'
-                    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">' + grid.join('') + '</div>';
-                box.parentNode.insertBefore(inln, box.nextSibling);
-            }
+            if (!has) return;
+            // Compact trigger: a slim bar under the blue strip. The full details
+            // (ticket info + time summary) open in a popup on click, so the
+            // ticket view stays uncluttered.
+            var bar = document.createElement('div');
+            bar.className = 'at-panel at-cw-detail';
+            bar.style.cssText = CARD + ';margin:10px 0;cursor:pointer';
+            bar.setAttribute('role', 'button');
+            bar.setAttribute('tabindex', '0');
+            bar.innerHTML = '<div style="' + HEAD + ';display:flex;align-items:center;gap:10px">'
+                + '<span>&#128203; ConnectWise Ticket</span>'
+                + '<span style="font-weight:600;text-transform:none;letter-spacing:0;color:#8a949e">&#9201; '
+                + worked.toFixed(2) + ' h worked / ' + est.toFixed(2) + ' h estimated</span>'
+                + '<span style="margin-left:auto;color:#1f6feb;font-weight:700">View details &#9656;</span></div>';
+            var openDetails = function () { showDetails(ctx, infoRows, tsBody); };
+            bar.addEventListener('click', openDetails);
+            bar.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetails(); } });
+            box.parentNode.insertBefore(bar, box.nextSibling);
         })();
 
         // Auto-select the reply form's Time Type from the ConnectWise ticket's
