@@ -42,6 +42,26 @@ cp include/plugins/<plugin-dir>/scp-docs.php         scp/connectwise-docs.php
 
 Re-copy these whenever the plugin is updated.
 
+### 2c. Load the ticket-view panel (REQUIRED — otherwise no panel appears)
+
+The ConnectWise information panel, inline time capture, and **time-summary
+popup** are rendered by `scp/connectwise-panel.php`, which must be loaded on
+staff pages. Add this just before `</body>` in
+`include/staff/footer.inc.php` (a core file — re-apply after an osTicket
+upgrade):
+
+```php
+<?php if (is_object($thisstaff) && $thisstaff->isStaff()
+        && is_file(ROOT_DIR.'scp/connectwise-panel.php')) { ?>
+    <script type="text/javascript" src="<?php echo ROOT_PATH; ?>scp/connectwise-panel.php"></script>
+<?php } ?>
+```
+
+Without this, the plugin still syncs, but no ConnectWise card or time summary
+shows on the ticket view. The script self-limits (admin-only nav tab; panel
+only on mapped tickets) and defers to a server-rendered nav tab if present, so
+it never double-adds the "ConnectWise" tab.
+
 ## 3. Core mod pieces
 
 The time-tracking integration relies on the core mod that adds Time Spent /

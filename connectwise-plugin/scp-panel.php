@@ -127,7 +127,10 @@ header('Cache-Control: no-cache');
     function addNav() {
         if (!IS_ADMIN) return;
         var ul = document.querySelector('ul#nav, #nav ul, nav#nav ul');
-        if (!ul || ul.querySelector('.at-nav-tab')) return;
+        // Skip if a ConnectWise tab already exists — either our own JS tab, or
+        // the server-rendered one (class.nav.php patch). Prevents a duplicate
+        // tab when both mechanisms are present.
+        if (!ul || ul.querySelector('.at-nav-tab') || ul.querySelector('a[href*="connectwise.php"]')) return;
         var li = document.createElement('li');
         // Match osTicket's own tab markup (active/inactive) so it inherits the
         // exact tab styling instead of default list-item rendering.
