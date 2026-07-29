@@ -429,14 +429,28 @@ class ConnectWisePluginConfig extends PluginConfig
             $config['max_retries'] = max(0, min(20, (int) $config['max_retries']));
         }
 
-        // If the integration is being enabled, require + validate credentials.
+        // If the integration is being enabled, require credentials — EITHER the
+        // legacy global credentials OR at least one enabled client instance.
+        // Multi-tenant installs keep credentials on the client (ConnectWise »
+        // Clients), not in this global config, so an enabled instance satisfies
+        // the requirement (mirrors the bootstrap's own enable condition).
         $enabling = !empty($config['enabled']);
         $haveCreds = !empty($config['api_username'])
             && !empty($config['api_secret'])
             && !empty($config['api_integration_code']);
+        $haveInstance = false;
+        try {
+            if (Installer::tableExists('connectwise_instance')) {
+                $r = db_query('SELECT 1 FROM `' . Installer::prefix()
+                    . 'connectwise_instance` WHERE enabled=1 LIMIT 1', false);
+                $haveInstance = (bool) ($r && db_num_rows($r) > 0);
+            }
+        } catch (\Throwable $e) {
+            $haveInstance = false;
+        }
 
-        if ($enabling && !$haveCreds) {
-            $errors['err'] = $__('Company ID + Public Key, Private Key and API Client ID are required to enable the integration.');
+        if ($enabling && !$haveCreds && !$haveInstance) {
+            $errors['err'] = $__('Add a client with its API credentials on the ConnectWise » Clients page before enabling the integration.');
             return false;
         }
 
