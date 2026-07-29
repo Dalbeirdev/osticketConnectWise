@@ -182,6 +182,103 @@ $ensureTimeTypes = static function (int $instanceId) use ($facade): array {
     return $created;
 };
 
+/**
+ * Auto-map ALL PSA-related fields on save: match osTicket Work Types,
+ * Priorities and Statuses to the client's live ConnectWise picklists by name
+ * and FILL ONLY THE GAPS (never overwrite a value the admin typed). Anything
+ * that can't be matched is returned so the admin can map it manually.
+ *
+ * @param int $instanceId Saved client instance id.
+ * @return array{added:int,unmapped:string[]}
+ */
+$autoMapFields = static function (int $instanceId) use ($facade, $repo): array {
+    $added = 0; $unmapped = array();
+    try {
+        $inst = $repo->find($instanceId);
+        if (!$inst) { return array('added' => 0, 'unmapped' => array()); }
+        $api  = $facade->container()->plugin()->getContainerFor($instanceId)->api();
+        $opts = $inst->configAll();
+        $ci   = static function ($s) { return mb_strtolower(trim((string) $s)); };
+
+        // Parse "Label=id" lines into [lc-label => "Label=id"], preserving the
+        // admin's exact text so their manual mappings always win.
+        $parse = static function ($raw) use ($ci) {
+            $out = array();
+            foreach (preg_split('/\r\n|\r|\n/', (string) $raw) as $ln) {
+                if (strpos($ln, '=') === false) { continue; }
+                list($l, $v) = array_map('trim', explode('=', $ln, 2));
+                if ($l !== '') { $out[$ci($l)] = $l . '=' . $v; }
+            }
+            return $out;
+        };
+
+        // One field-info call feeds both status + priority (getFieldInfo walks
+        // boards, so avoid calling it twice).
+        $cwStatus = array(); $cwPrio = array();
+        foreach ($api->getFieldInfo('Tickets') as $f) {
+            if (($f['name'] ?? '') === 'status') {
+                foreach ($f['picklistValues'] as $v) { $cwStatus[$ci($v['label'])] = (int) $v['value']; }
+            } elseif (($f['name'] ?? '') === 'priority') {
+                foreach ($f['picklistValues'] as $v) { $cwPrio[$ci($v['label'])] = (int) $v['value']; }
+            }
+        }
+
+        /* ---- Work Types: osTicket Time Type -> CW work type (exact name) ---- */
+        $cwWt = array();
+        foreach ($api->getBillingCodes() as $w) { $cwWt[$ci($w['name'])] = (int) $w['id']; }
+        $wtMap = $parse($opts['timetype_map'] ?? '');
+        $wtBad = array();
+        $rw = db_query('SELECT li.value FROM ' . TABLE_PREFIX . 'list_items li JOIN '
+            . TABLE_PREFIX . "list l ON l.id=li.list_id WHERE l.type='time-type' AND li.status=1", false);
+        while ($rw && ($x = db_fetch_array($rw))) {
+            $label = (string) $x['value']; $k = $ci($label);
+            if ($label === '' || isset($wtMap[$k])) { continue; }
+            if (isset($cwWt[$k])) { $wtMap[$k] = $label . '=' . $cwWt[$k]; $added++; }
+            else { $wtBad[] = $label; }
+        }
+        $opts['timetype_map'] = implode("\n", array_values($wtMap));
+        if ($wtBad) { $unmapped[] = 'Time Types → default work type: ' . implode(', ', $wtBad); }
+
+        /* ---- Priorities: exact name, else CW name contains the osTicket word ---- */
+        $prMap = $parse($opts['priority_map'] ?? '');
+        $prBad = array();
+        $rp = db_query('SELECT priority_desc FROM ' . TABLE_PREFIX . 'ticket_priority', false);
+        while ($rp && ($x = db_fetch_array($rp))) {
+            $label = (string) $x['priority_desc']; $k = $ci($label);
+            if ($label === '' || isset($prMap[$k])) { continue; }
+            $hit = $cwPrio[$k] ?? null;
+            if ($hit === null) {
+                foreach ($cwPrio as $cn => $cid) { if (strpos($cn, $k) !== false) { $hit = $cid; break; } }
+            }
+            if ($hit !== null) { $prMap[$k] = $label . '=' . $hit; $added++; }
+            else { $prBad[] = $label; }
+        }
+        $opts['priority_map'] = implode("\n", array_values($prMap));
+        if ($prBad) { $unmapped[] = 'Priorities (map manually): ' . implode(', ', $prBad); }
+
+        /* ---- Statuses: exact name match only (names are board-specific) ---- */
+        $stMap = $parse($opts['status_map'] ?? '');
+        $stBad = array();
+        if (class_exists('TicketStatus')) {
+            foreach (\TicketStatus::objects() as $st) {
+                $label = method_exists($st, 'getName') ? (string) $st->getName() : '';
+                $k = $ci($label);
+                if ($label === '' || isset($stMap[$k])) { continue; }
+                if (isset($cwStatus[$k])) { $stMap[$k] = $label . '=' . $cwStatus[$k]; $added++; }
+                else { $stBad[] = $label; }
+            }
+        }
+        $opts['status_map'] = implode("\n", array_values($stMap));
+        if ($stBad) { $unmapped[] = 'Statuses (Status Map / open-closed fallback): ' . implode(', ', $stBad); }
+
+        $repo->update($instanceId, array('config_json' => $opts));
+    } catch (\Throwable $e) {
+        // Auto-map is best-effort; a bad/untestable connection must not block save.
+        $unmapped[] = 'auto-map skipped (' . $e->getMessage() . ')';
+    }
+    return array('added' => $added, 'unmapped' => $unmapped);
+};
+
 /* ---------------------------------------------------------------------------
  * POST actions (CSRF-checked).
  * ------------------------------------------------------------------------- */
@@ -243,9 +340,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $notice .= ' Created osTicket status(es): ' . htmlspecialchars(implode(', ', $made)) . '.';
                             }
                             // Mirror the client's ConnectWise work types as Time Types.
-                            $tt = $ensureTimeTypes($id > 0 ? $id : (int) ($newId ?? 0));
+                            $savedId = $id > 0 ? $id : (int) ($newId ?? 0);
+                            $tt = $ensureTimeTypes($savedId);
                             if ($tt) {
                                 $notice .= ' Created Time Type(s): ' . htmlspecialchars(implode(', ', $tt)) . '.';
+                            }
+                            // Auto-map ALL PSA fields (work type / priority / status)
+                            // against the live ConnectWise picklists — fills gaps only.
+                            $am = $autoMapFields($savedId);
+                            if (!empty($am['added'])) {
+                                $notice .= ' Auto-mapped ' . (int) $am['added'] . ' field value(s) to ConnectWise.';
+                            }
+                            if (!empty($am['unmapped'])) {
+                                $notice .= ' &#9888; Review unmapped — ' . htmlspecialchars(implode('; ', $am['unmapped'])) . '.';
                             }
                         }
                     }
