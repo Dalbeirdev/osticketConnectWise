@@ -1376,19 +1376,21 @@ class SyncEngine
             foreach ($this->api->getTimeEntries($atTicketId) as $te) {
                 $teId = (int) ($te['id'] ?? 0);
                 $txt  = trim((string) ($te['summaryNotes'] ?? ''));
-                $ct   = (string) ($te['createDateTime'] ?? '');
                 if ($teId && isset($seen[$teId])) {
                     // Already known — reflect AT-side EDITS onto the panel
                     // table (thread record stays: history preserved).
                     $this->refreshLocalTimeEntry($teId, $te);
                     continue;
                 }
-                if (!$teId || $txt === '' || strpos($txt, self::LOOP_MARKER) !== false) {
-                    continue;
+                if (!$teId || strpos($txt, self::LOOP_MARKER) !== false) {
+                    continue; // our own echo, or no id
                 }
-                if ($ct !== '' && $this->toUtc($ct) <= $sinceUtc) {
-                    continue; // already covered by a previous scan window
-                }
+                // NO create-date window filter here. getTimeEntries() returns EVERY
+                // entry for the ticket, and $seen already dedups by id (entries we
+                // pushed + entries already imported). A createDateTime <= cursor cutoff
+                // would permanently orphan any never-imported entry logged before the
+                // ticket's activity cursor (e.g. time logged just before the ticket was
+                // mapped, or between scans) — the cause of missing entries in the panel.
                 // Native representation: store the time on the thread entry via
                 // the core time-tracking mod's own vars (time_spent minutes),
                 // so it renders like any local entry — no hours written in text.
@@ -1396,7 +1398,10 @@ class SyncEngine
                 $minutes = max(1, (int) round($hours * 60));
                 $billable = empty($te['isNonBillable']) ? 1 : 0;
                 $internal = trim((string) ($te['internalNotes'] ?? ''));
-                $noteTxt  = $txt . ($internal !== '' ? "\n\n" . $internal : '');
+                $noteTxt  = trim($txt . ($internal !== '' ? "\n\n" . $internal : ''));
+                // A time entry can carry hours with no notes; still import it (with a
+                // placeholder) so the panel total reflects ALL ConnectWise time.
+                if ($noteTxt === '') { $noteTxt = '(time logged in ConnectWise)'; }
                 // Author parity: show the real ConnectWise resource as the poster.
                 $who = $this->atAuthorName($te, (int) ($map['instance_id'] ?? 1));
                 $entry = null;
