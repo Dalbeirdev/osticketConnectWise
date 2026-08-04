@@ -1288,6 +1288,26 @@ class SyncEngine
      * @param int     $atTicketId
      * @param array   $map
      */
+    /**
+     * Clean ConnectWise note/time text for the osTicket thread. ConnectWise embeds
+     * inline images as markdown pointing at its authenticated /newinlineimages/
+     * endpoint; those URLs need a ConnectWise web session, so in osTicket they
+     * render as broken links / raw markdown. The actual image FILES arrive
+     * separately via attachment sync, so strip the inline-image markdown here.
+     */
+    private function cleanCwText(string $text): string
+    {
+        // ![alt](url) markdown images (covers CW's ![\[image\]](…newinlineimages…),
+        // whose alt text itself contains ']', so match non-greedily up to '](url)').
+        $t = preg_replace('/!\[.*?\]\([^)]*\)/us', '', $text);
+        // Any bare inline-image URL left behind.
+        $t = preg_replace('#https?://\S*newinlineimages/\S*#u', '', (string) $t);
+        // Tidy the whitespace the removals leave.
+        $t = preg_replace('/[ \t]+\n/u', "\n", (string) $t);
+        $t = preg_replace('/\n{3,}/u', "\n\n", (string) $t);
+        return trim((string) $t);
+    }
+
     private function applyInboundNotes(\Ticket $osTicket, int $atTicketId, array $map): void
     {
         $since = $map['connectwise_lastactivity'] ?: gmdate('Y-m-d\TH:i:s\Z', time() - 86400);
@@ -1311,7 +1331,7 @@ class SyncEngine
 
         $notes = $this->api->getTicketNotesSince($atTicketId, $sinceUtc);
         foreach ($notes as $note) {
-            $desc = (string) ($note['description'] ?? '');
+            $desc = $this->cleanCwText((string) ($note['description'] ?? ''));
             if ($desc === '' || isset($known[(int) ($note['id'] ?? 0)])
                 || strpos($desc, self::LOOP_MARKER) !== false) {
                 continue; // skip our own exported notes (id match or legacy marker)
@@ -1397,7 +1417,7 @@ class SyncEngine
             while ($r0 && ($row0 = db_fetch_array($r0))) { $seen[(int) $row0['connectwise_note_id']] = true; }
             foreach ($this->api->getTimeEntries($atTicketId) as $te) {
                 $teId = (int) ($te['id'] ?? 0);
-                $txt  = trim((string) ($te['summaryNotes'] ?? ''));
+                $txt  = $this->cleanCwText(trim((string) ($te['summaryNotes'] ?? '')));
                 if ($teId && isset($seen[$teId])) {
                     // Already known — reflect AT-side EDITS onto the panel
                     // table (thread record stays: history preserved).
@@ -1419,7 +1439,7 @@ class SyncEngine
                 $hours   = (float) ($te['hoursWorked'] ?? 0);
                 $minutes = max(1, (int) round($hours * 60));
                 $billable = empty($te['isNonBillable']) ? 1 : 0;
-                $internal = trim((string) ($te['internalNotes'] ?? ''));
+                $internal = $this->cleanCwText(trim((string) ($te['internalNotes'] ?? '')));
                 $noteTxt  = trim($txt . ($internal !== '' ? "\n\n" . $internal : ''));
                 // A time entry can carry hours with no notes; still import it (with a
                 // placeholder) so the panel total reflects ALL ConnectWise time.
