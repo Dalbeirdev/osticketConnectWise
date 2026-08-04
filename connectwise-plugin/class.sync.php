@@ -304,7 +304,29 @@ class SyncEngine
         }
 
         $fields = $this->mapper->buildConnectWiseFields($osTicket, $this->api, $this->logger);
-        $atId   = $this->api->createTicket($fields);
+        try {
+            $atId = $this->api->createTicket($fields);
+        } catch (ApiException $e) {
+            // Some ConnectWise company statuses (e.g. "not-Approved") forbid saving
+            // Service Tickets. When the requester's contact resolves to such a
+            // company, fall back to the admin-configured default company so the
+            // ticket still syncs instead of dead-lettering — with a loud warning.
+            $default  = (int) ($this->settings->defaults()['company_id'] ?? 0);
+            $resolved = (int) ($fields['companyID'] ?? 0);
+            if ($default && $resolved !== $default
+                && stripos($e->getMessage(), 'does not allow saving') !== false) {
+                $this->logger->warning(
+                    "ConnectWise company #$resolved rejected the ticket (its status forbids Service "
+                    . "Tickets); retrying osTicket #$ostId on the default company #$default. Fix the "
+                    . 'contact/company data in ConnectWise so tickets bill to the right company.',
+                    array('category' => 'outbound', 'osticket_ticket_id' => $ostId));
+                $fields['companyID'] = $default;
+                unset($fields['contactID']); // contact belongs to the rejected company
+                $atId = $this->api->createTicket($fields);
+            } else {
+                throw $e;
+            }
+        }
 
         // Fetch the human ticket number (T2026….NNNN) — create only returns the id.
         $atNumber = '';
