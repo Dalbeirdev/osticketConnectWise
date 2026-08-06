@@ -38,6 +38,23 @@ class ConnectWise
     public function testConnection(): array
     {
         $result = $this->c->api()->testConnection();
+        // Basic connectivity can pass while the API member's SECURITY ROLE still
+        // blocks the setup tables (boards/statuses/priorities/work types) — which
+        // breaks Field Mappings and status sync with confusing 403s later. Probe
+        // one setup endpoint so the admin learns about it HERE, not in the logs.
+        if (!empty($result['ok'])) {
+            try {
+                $this->c->api()->request('GET', 'service/boards?pageSize=1');
+            } catch (\Throwable $e) {
+                if (stripos($e->getMessage(), 'permission') !== false) {
+                    $result['message'] = trim((string) ($result['message'] ?? ''))
+                        . ' WARNING: this API member cannot read the Service Desk setup tables '
+                        . '(boards/statuses) — Field Mappings and status sync will fail. In '
+                        . "ConnectWise, edit the API member's Security Role: System > Table Setup "
+                        . 'and Service Desk modules need Inquire = All.';
+                }
+            }
+        }
         $this->c->settings()->setState('last_connection_test', array(
             'ok'      => $result['ok'],
             'message' => $result['message'],
