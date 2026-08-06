@@ -140,13 +140,15 @@ class SyncEngine
             ? $entryTitle
             : ($poster !== '' ? $poster : ($isNote ? 'Internal Note' : 'Reply'));
 
-        // ConnectWise-native behaviour (user policy): when this same submission
-        // also carries inline time (Time Spent fields), the TIME ENTRY holds
-        // the text as its summary — a separate note would duplicate the update.
+        // A public REPLY is a customer-facing message: it must always reach the
+        // ConnectWise discussion, even when time is logged alongside it. Only an
+        // INTERNAL note that carries inline time is treated as the time-work
+        // description — there the TIME ENTRY holds the text and a separate note
+        // would duplicate it, so it is suppressed.
         try {
             $f = $this->settings->timeFieldNames();
             $spent = $_POST[$f['spent']] ?? null;
-            if ($this->settings->captureTimeEnabled() && is_numeric($spent) && (float) $spent > 0) {
+            if ($isNote && $this->settings->captureTimeEnabled() && is_numeric($spent) && (float) $spent > 0) {
                 // Text rides the time entry — but the entry's FILES must still
                 // reach ConnectWise: queue an attachments-only job when present.
                 $hasFiles = false;
