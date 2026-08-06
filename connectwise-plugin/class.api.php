@@ -217,6 +217,12 @@ class ConnectWiseApi
         if (!empty($fields['source'])) {
             $body['source'] = array('id' => (int) $fields['source']);
         }
+        // Dynamic custom fields (admin-mapped per client): [{id, value}, …].
+        if (!empty($fields['customFields']) && is_array($fields['customFields'])) {
+            $body['customFields'] = array_values(array_map(static function ($cf) {
+                return array('id' => (int) $cf['id'], 'value' => $cf['value']);
+            }, $fields['customFields']));
+        }
 
         $resp = $this->request('POST', 'service/tickets', $body);
         if (empty($resp['id'])) {
@@ -664,6 +670,65 @@ class ConnectWiseApi
      * @return array<int,array<string,mixed>> Active work types, normalized to
      *         the billing-code shape (id, name, isActive, useType=1).
      */
+
+    /** @return array<int,array{id:int,name:string}> Service boards of this tenant. */
+    public function listBoards(): array
+    {
+        $out = array();
+        foreach ((array) $this->request('GET', 'service/boards?pageSize=100&orderBy=name') as $b) {
+            if (!empty($b['id'])) { $out[] = array('id' => (int) $b['id'], 'name' => (string) ($b['name'] ?? '')); }
+        }
+        return $out;
+    }
+
+    /** @return array<int,array{id:int,name:string,closed:bool}> Statuses of ONE board (per-board in ConnectWise). */
+    public function listBoardStatuses(int $boardId): array
+    {
+        $out = array();
+        foreach ((array) $this->request('GET', "service/boards/$boardId/statuses?pageSize=100&orderBy=sortOrder") as $s) {
+            if (!empty($s['id'])) {
+                $out[] = array('id' => (int) $s['id'], 'name' => (string) ($s['name'] ?? ''),
+                    'closed' => !empty($s['closedStatus']));
+            }
+        }
+        return $out;
+    }
+
+    /** @return array<int,array{id:int,name:string}> Ticket priorities of this tenant. */
+    public function listPriorities(): array
+    {
+        $out = array();
+        foreach ((array) $this->request('GET', 'service/priorities?pageSize=100&orderBy=sortOrder') as $p) {
+            if (!empty($p['id'])) { $out[] = array('id' => (int) $p['id'], 'name' => (string) ($p['name'] ?? '')); }
+        }
+        return $out;
+    }
+
+    /**
+     * Custom field (user-defined field) definitions of this tenant. Not every
+     * ConnectWise version/plan exposes the endpoint — degrade to an empty list.
+     *
+     * @return array<int,array{id:int,caption:string,type:string,screen:string}>
+     */
+    public function listCustomFieldDefs(): array
+    {
+        try {
+            $out = array();
+            foreach ((array) $this->request('GET', 'system/userDefinedFields?pageSize=100') as $f) {
+                if (empty($f['id'])) { continue; }
+                $out[] = array(
+                    'id'      => (int) $f['id'],
+                    'caption' => (string) ($f['caption'] ?? ('UDF #' . $f['id'])),
+                    'type'    => (string) ($f['fieldTypeIdentifier'] ?? ($f['type'] ?? '')),
+                    'screen'  => (string) ($f['screenIdentifier'] ?? ($f['screen'] ?? '')),
+                );
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            return array();
+        }
+    }
+
     public function getBillingCodes(): array
     {
         $items = $this->request('GET', 'time/workTypes?' . http_build_query(array(

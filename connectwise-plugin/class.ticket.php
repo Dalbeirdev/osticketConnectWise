@@ -224,6 +224,31 @@ class Ticket
         if (empty($fields['status'])) {
             $fields['status'] = 1;
         }
+
+        // Dynamic custom fields (Field Mappings screen): push the mapped osTicket
+        // form-field values as ConnectWise customFields on create.
+        try {
+            $cfMap = $this->settings->customFieldMap();
+            if ($cfMap) {
+                $tid = (int) $osTicket->getId();
+                $p = TABLE_PREFIX;
+                $custom = array();
+                foreach ($cfMap as $cwId => $ostFieldId) {
+                    $r = db_query("SELECT v.value FROM {$p}form_entry_values v JOIN {$p}form_entry e "
+                        . 'ON e.id=v.entry_id WHERE v.field_id=' . (int) $ostFieldId
+                        . " AND e.object_type='T' AND e.object_id=$tid LIMIT 1", false);
+                    if ($r && ($x = db_fetch_array($r)) && trim((string) $x['value']) !== '') {
+                        $custom[] = array('id' => (int) $cwId, 'value' => (string) $x['value']);
+                    }
+                }
+                if ($custom) {
+                    $fields['customFields'] = $custom;
+                }
+            }
+        } catch (\Throwable $e) {
+            $logger->warning('Custom-field outbound skipped: ' . $e->getMessage(),
+                array('category' => 'mapping', 'osticket_ticket_id' => $osTicket->getId()));
+        }
         // Identity masking: NO "Synced from osTicket" trailer — the linkage
         // lives in the mapping table; the client sees a clean description.
 

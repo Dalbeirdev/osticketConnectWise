@@ -297,6 +297,52 @@ class Settings
      *
      * @return array<int,string> AT status id => lowercased osTicket status name
      */
+    /**
+     * INBOUND status map (Field Mappings screen): exact "cwStatusId=ostStatusId"
+     * pairs, unambiguous even when several boards reuse the same status NAME.
+     * Wins over statusMapReverse()/name parity when a pair exists.
+     *
+     * @return array<int,int> ConnectWise status id => osTicket status id.
+     */
+    public function statusMapInbound(): array
+    {
+        $map = array();
+        foreach (preg_split('/\r\n|\r|\n/', (string) $this->config->get('status_map_inbound')) as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '=') === false) {
+                continue;
+            }
+            list($cw, $ost) = array_map('trim', explode('=', $line, 2));
+            if (is_numeric($cw) && is_numeric($ost)) {
+                $map[(int) $cw] = (int) $ost;
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * Custom-field map (Field Mappings screen): "cwCustomFieldId=osTicketFieldId"
+     * pairs pairing a ConnectWise user-defined field with an osTicket dynamic
+     * form field. Values sync inbound on import/refresh and outbound on create.
+     *
+     * @return array<int,int> ConnectWise UDF id => osTicket form_field id.
+     */
+    public function customFieldMap(): array
+    {
+        $map = array();
+        foreach (preg_split('/\r\n|\r|\n/', (string) $this->config->get('custom_field_map')) as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '=') === false) {
+                continue;
+            }
+            list($cw, $ost) = array_map('trim', explode('=', $line, 2));
+            if (is_numeric($cw) && is_numeric($ost)) {
+                $map[(int) $cw] = (int) $ost;
+            }
+        }
+        return $map;
+    }
+
     public function statusMapReverse(): array
     {
         $out = array();

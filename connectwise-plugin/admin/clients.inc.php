@@ -95,6 +95,10 @@ $optionTypes = array(
     'close_osticket_on_complete' => 'bool',
     'status_map'                 => 'str',
     'priority_map'               => 'str',
+    // Written by the Field Mappings screen; the edit form round-trips them via
+    // hidden inputs so a plain client save never wipes them.
+    'status_map_inbound'         => 'str',
+    'custom_field_map'           => 'str',
     'sync_attachments'           => 'bool',
     'import_system_notes'        => 'bool',
     'dept_map'                   => 'deptmap',
@@ -290,6 +294,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id     = (int) ($_POST['client_id'] ?? 0);
         try {
             switch ($action) {
+
+                case 'save_field_map':
+                    // Field Mappings screen: rebuild the four map options from the
+                    // posted dropdown pairs and MERGE into this client's config —
+                    // everything else in config_json is left untouched.
+                    $inst = $repo->find($id);
+                    if (!$inst) { $error = 'Client not found.'; break; }
+                    $cfg = $inst->configAll();
+
+                    // Status pairs: fm_status[cwStatusId] = osTicket status id.
+                    $inLines = array(); $outLines = array();
+                    $stName = array();
+                    $rs = db_query('SELECT id, name FROM ' . TABLE_PREFIX . 'ticket_status');
+                    while ($rs && ($x = db_fetch_array($rs))) { $stName[(int) $x['id']] = (string) $x['name']; }
+                    foreach ((array) ($_POST['fm_status'] ?? array()) as $cwId => $ostId) {
+                        $cwId = (int) $cwId; $ostId = (int) $ostId;
+                        if (!$cwId || !$ostId || !isset($stName[$ostId])) { continue; }
+                        $inLines[]  = $cwId . '=' . $ostId;
+                        // Outbound stays name-keyed (engine contract); when two boards
+                        // map different ids to the same osT status the ticket's own
+                        // board resolution in the engine picks the right id anyway.
+                        $outLines[mb_strtolower($stName[$ostId])] = $stName[$ostId] . '=' . $cwId;
+                    }
+                    $cfg['status_map_inbound'] = implode("\n", $inLines);
+                    $cfg['status_map']         = implode("\n", array_values($outLines));
+
+                    // Priority pairs: fm_prio[cwPrioId] = osTicket priority id.
+                    $prName = array();
+                    $rp = db_query('SELECT priority_id, priority_desc FROM ' . TABLE_PREFIX . 'ticket_priority');
+                    while ($rp && ($x = db_fetch_array($rp))) { $prName[(int) $x['priority_id']] = (string) $x['priority_desc']; }
+                    $prLines = array();
+                    foreach ((array) ($_POST['fm_prio'] ?? array()) as $cwId => $pid) {
+                        $cwId = (int) $cwId; $pid = (int) $pid;
+                        if (!$cwId || !$pid || !isset($prName[$pid])) { continue; }
+                        $prLines[mb_strtolower($prName[$pid])] = $prName[$pid] . '=' . $cwId;
+                    }
+                    $cfg['priority_map'] = implode("\n", array_values($prLines));
+
+                    // Custom-field pairs: fm_cf[cwUdfId] = osTicket form_field id.
+                    $cfLines = array();
+                    foreach ((array) ($_POST['fm_cf'] ?? array()) as $cwId => $fid) {
+                        $cwId = (int) $cwId; $fid = (int) $fid;
+                        if ($cwId && $fid) { $cfLines[] = $cwId . '=' . $fid; }
+                    }
+                    $cfg['custom_field_map'] = implode("\n", $cfLines);
+
+                    $repo->update($id, array('config_json' => $cfg));
+                    $notice = 'Field mappings saved for ' . htmlspecialchars($inst->name())
+                        . ' — status sync now uses your explicit pairs (both directions).';
+                    break;
 
                 case 'save_client':
                     $fields = array(
@@ -540,6 +594,64 @@ if ($mode === 'tickets') {
             $ct['last_sync_disp'] = $ts ? date('M j, H:i', $ts) : (string) $ct['last_sync_time'];
         }
         unset($ct);
+    }
+}
+
+// "Field Mappings" sub-view: everything is fetched LIVE from this client's own
+// ConnectWise tenant (boards, per-board statuses, priorities, work types,
+// custom-field definitions) — nothing hardcoded, so each registered instance
+// sees exactly its own fields. osTicket counterparts come from the local DB.
+$fm = null;
+if ($mode === 'map') {
+    $editing = $repo->find((int) ($_GET['id'] ?? 0));
+    if (!$editing) {
+        $mode = 'list';
+        $error = $error ?: 'Client not found.';
+    } else {
+        $fm = array('boards' => array(), 'priorities' => array(), 'workTypes' => array(),
+            'custom' => array(), 'curIn' => array(), 'curPrio' => array(), 'curCf' => array(),
+            'osStatuses' => array(), 'osPriorities' => array(), 'osFields' => array(),
+            'osTimeTypes' => array(), 'err' => null);
+        try {
+            $cM  = $facade->container()->plugin()->getContainerFor($editing->id());
+            $apiM = $cM->api();
+            $setM = $cM->settings();
+
+            // ConnectWise side (live).
+            $spec = $setM->importFilterSpec();
+            $wantBoards = array_map('intval', (array) ($spec['queue_ids'] ?? array()));
+            foreach ($apiM->listBoards() as $b) {
+                if ($wantBoards && !in_array($b['id'], $wantBoards, true)) { continue; }
+                if (count($fm['boards']) >= 12) { break; }
+                try { $sts = $apiM->listBoardStatuses($b['id']); } catch (\Throwable $e) { $sts = array(); }
+                $fm['boards'][] = array('id' => $b['id'], 'name' => $b['name'], 'statuses' => $sts);
+            }
+            $fm['priorities'] = $apiM->listPriorities();
+            foreach ($apiM->getBillingCodes() as $wt) {
+                $fm['workTypes'][] = array('id' => (int) ($wt['id'] ?? 0), 'name' => (string) ($wt['name'] ?? ''));
+            }
+            $fm['custom'] = $apiM->listCustomFieldDefs();
+
+            // Current mappings (per instance).
+            $fm['curIn']   = $setM->statusMapInbound();
+            $fm['curPrio'] = $setM->priorityMapReverse();   // cwId => osT priority NAME (lowercased)
+            $fm['curCf']   = $setM->customFieldMap();
+
+            // osTicket side.
+            $r = db_query('SELECT id, name, state FROM ' . TABLE_PREFIX . 'ticket_status ORDER BY name');
+            while ($r && ($x = db_fetch_array($r))) { $fm['osStatuses'][] = $x; }
+            $r = db_query('SELECT priority_id, priority_desc FROM ' . TABLE_PREFIX . 'ticket_priority ORDER BY priority_urgency');
+            while ($r && ($x = db_fetch_array($r))) { $fm['osPriorities'][] = $x; }
+            $r = db_query('SELECT f.id, f.label, f.type FROM ' . TABLE_PREFIX . 'form_field f JOIN '
+                . TABLE_PREFIX . "form fo ON fo.id=f.form_id WHERE fo.type='T' "
+                . "AND f.name NOT IN ('subject','priority') ORDER BY f.sort");
+            while ($r && ($x = db_fetch_array($r))) { $fm['osFields'][] = $x; }
+            $r = db_query('SELECT li.value FROM ' . TABLE_PREFIX . 'list_items li JOIN '
+                . TABLE_PREFIX . "list l ON l.id=li.list_id WHERE l.type='time-type' AND li.status=1", false);
+            while ($r && ($x = db_fetch_array($r))) { $fm['osTimeTypes'][mb_strtolower(trim($x['value']))] = true; }
+        } catch (\Throwable $e) {
+            $fm['err'] = $e->getMessage();
+        }
     }
 }
 

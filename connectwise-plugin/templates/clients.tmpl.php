@@ -51,7 +51,8 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
         <h1>ConnectWise Clients <span class="at-sub"><?=
             $mode === 'list' ? 'Instance Manager'
             : ($mode === 'edit' ? 'Edit Client'
-            : ($mode === 'tickets' ? ('Tickets — ' . $e($editing ? $editing->name() : '')) : 'Register Client')) ?></span></h1>
+            : ($mode === 'tickets' ? ('Tickets — ' . $e($editing ? $editing->name() : ''))
+            : ($mode === 'map' ? ('Field Mappings — ' . $e($editing ? $editing->name() : '')) : 'Register Client'))) ?></span></h1>
         <div class="at-badges">
             <a class="at-btn at-btn-ghost" href="connectwise.php">&larr; Dashboard</a>
             <?php if ($mode === 'list'): ?>
@@ -97,6 +98,7 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                 </div>
                 <div class="at-client-actions">
                     <a class="at-btn at-btn-sm at-btn-ghost" href="connectwise.php?view=clients&amp;mode=tickets&amp;id=<?= $c->id() ?>">Tickets</a>
+                    <a class="at-btn at-btn-sm at-btn-ghost" href="connectwise.php?view=clients&amp;mode=map&amp;id=<?= $c->id() ?>">Mappings</a>
                     <a class="at-btn at-btn-sm at-btn-ghost" href="connectwise.php?instance=<?= $c->id() ?>">Dashboard</a>
                     <form method="post" class="at-inline">
                         <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
@@ -272,6 +274,140 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
         </script>
     </section>
 
+<?php elseif ($mode === 'map' && $editing): ?>
+
+    <!-- ================= Field Mappings sub-view ================= -->
+    <style>
+        .fm-note{background:#eef4ff;border:1px solid #d3e0f5;border-radius:8px;padding:10px 12px;
+                 font-size:13px;color:#31456b;margin:0 0 12px}
+        .fm-board{margin:0 0 4px;font-size:13px;font-weight:700;color:#31456b}
+        .fm-sub{font-size:11px;color:#8a97a8;margin-left:6px;font-weight:400}
+        .fm-tbl select{min-width:220px;padding:4px 8px;border:1px solid #d0d7de;border-radius:6px}
+        .fm-closed{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;
+                 background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:600}
+        .fm-ok{color:#166534;font-weight:600}
+        .fm-miss{color:#92400e;font-weight:600}
+    </style>
+
+    <?php if (!empty($fm['err'])): ?>
+        <section class="at-box"><p class="at-err">Could not fetch this client's ConnectWise fields:
+            <?= $e($fm['err']) ?></p></section>
+    <?php else: ?>
+
+    <section class="at-box">
+        <div class="fm-note">
+            Everything below is fetched <strong>live from this client's own ConnectWise tenant</strong> —
+            boards, per-board statuses, priorities, work types and custom fields. Map each ConnectWise value
+            to its osTicket counterpart; pairs are stored <strong>per client</strong> and drive the sync in
+            <strong>both directions</strong>. Unmapped values fall back to automatic name-matching, then open/closed.
+        </div>
+
+        <form method="post">
+            <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
+            <input type="hidden" name="action" value="save_field_map">
+            <input type="hidden" name="client_id" value="<?= (int) $editing->id() ?>">
+
+            <h2>Ticket Statuses <span class="fm-sub">per board — ConnectWise status &rarr; osTicket status</span></h2>
+            <?php foreach ($fm['boards'] as $b): ?>
+                <div class="fm-board"><?= $e($b['name']) ?> <span class="fm-sub">board #<?= (int) $b['id'] ?></span></div>
+                <table class="at-table fm-tbl" style="margin-bottom:14px">
+                    <thead><tr><th style="width:45%">ConnectWise status</th><th>osTicket status</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($b['statuses'] as $s): ?>
+                        <tr>
+                            <td><?= $e($s['name']) ?> <span class="fm-sub">#<?= (int) $s['id'] ?></span>
+                                <?= $s['closed'] ? '<span class="fm-closed">closed</span>' : '' ?></td>
+                            <td>
+                                <select name="fm_status[<?= (int) $s['id'] ?>]">
+                                    <option value="0">— automatic (name match / open-closed) —</option>
+                                    <?php foreach ($fm['osStatuses'] as $os): ?>
+                                        <option value="<?= (int) $os['id'] ?>"
+                                            <?= (int) ($fm['curIn'][$s['id']] ?? 0) === (int) $os['id'] ? 'selected' : '' ?>>
+                                            <?= $e($os['name']) ?> (<?= $e($os['state']) ?>)</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (!$b['statuses']): ?>
+                        <tr><td colspan="2" class="at-muted">No statuses on this board.</td></tr>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            <?php endforeach; ?>
+
+            <h2 style="margin-top:18px">Priorities <span class="fm-sub">ConnectWise priority &rarr; osTicket priority</span></h2>
+            <table class="at-table fm-tbl" style="margin-bottom:14px;max-width:720px">
+                <thead><tr><th style="width:45%">ConnectWise priority</th><th>osTicket priority</th></tr></thead>
+                <tbody>
+                <?php foreach ($fm['priorities'] as $p): ?>
+                    <tr>
+                        <td><?= $e($p['name']) ?> <span class="fm-sub">#<?= (int) $p['id'] ?></span></td>
+                        <td>
+                            <select name="fm_prio[<?= (int) $p['id'] ?>]">
+                                <option value="0">— automatic (name / synonym match) —</option>
+                                <?php $curName = mb_strtolower((string) ($fm['curPrio'][$p['id']] ?? '')); ?>
+                                <?php foreach ($fm['osPriorities'] as $op): ?>
+                                    <option value="<?= (int) $op['priority_id'] ?>"
+                                        <?= $curName !== '' && $curName === mb_strtolower($op['priority_desc']) ? 'selected' : '' ?>>
+                                        <?= $e($op['priority_desc']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <h2 style="margin-top:18px">Custom Fields <span class="fm-sub">ConnectWise user-defined field &rarr; osTicket form field</span></h2>
+            <?php if (!$fm['custom']): ?>
+                <p class="at-muted" style="margin-bottom:14px">This ConnectWise tenant exposes no custom (user-defined)
+                    fields via its API — nothing to map. Fields added later appear here automatically.</p>
+            <?php else: ?>
+            <table class="at-table fm-tbl" style="margin-bottom:14px;max-width:820px">
+                <thead><tr><th style="width:45%">ConnectWise custom field</th><th>osTicket field</th></tr></thead>
+                <tbody>
+                <?php foreach ($fm['custom'] as $cf): ?>
+                    <tr>
+                        <td><?= $e($cf['caption']) ?> <span class="fm-sub">#<?= (int) $cf['id'] ?>
+                            <?= $cf['type'] ? '· ' . $e($cf['type']) : '' ?><?= $cf['screen'] ? ' · ' . $e($cf['screen']) : '' ?></span></td>
+                        <td>
+                            <select name="fm_cf[<?= (int) $cf['id'] ?>]">
+                                <option value="0">— not synced —</option>
+                                <?php foreach ($fm['osFields'] as $of): ?>
+                                    <option value="<?= (int) $of['id'] ?>"
+                                        <?= (int) ($fm['curCf'][$cf['id']] ?? 0) === (int) $of['id'] ? 'selected' : '' ?>>
+                                        <?= $e($of['label']) ?> (<?= $e($of['type']) ?>)</option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php endif; ?>
+
+            <h2 style="margin-top:18px">Work Types <span class="fm-sub">matched to osTicket Time Types by name (auto-managed)</span></h2>
+            <table class="at-table" style="margin-bottom:14px;max-width:620px">
+                <thead><tr><th>ConnectWise work type</th><th>osTicket Time Type</th></tr></thead>
+                <tbody>
+                <?php foreach ($fm['workTypes'] as $wt): ?>
+                    <tr>
+                        <td><?= $e($wt['name']) ?> <span class="fm-sub">#<?= (int) $wt['id'] ?></span></td>
+                        <td><?= isset($fm['osTimeTypes'][mb_strtolower(trim($wt['name']))])
+                            ? '<span class="fm-ok">&#10003; matched</span>'
+                            : '<span class="fm-miss">missing — re-save the client to auto-create</span>' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <button type="submit" class="at-btn">Save Field Mappings</button>
+            <a class="at-btn at-btn-ghost" href="connectwise.php?view=clients">Cancel</a>
+        </form>
+    </section>
+    <?php endif; ?>
+
 <?php else: ?>
 
     <!-- Standalone form for the ID-reference refresh (cannot nest forms). -->
@@ -420,6 +556,10 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                 <textarea name="o_priority_map" class="at-fld" rows="4"
                     placeholder="Emergency=1&#10;High=2&#10;Normal=4&#10;Low=6"><?= $e($opt('priority_map')) ?></textarea>
             </div>
+            <!-- Field Mappings screen data: round-tripped so a plain client save
+                 never wipes it. Edit visually via the Mappings button instead. -->
+            <input type="hidden" name="o_status_map_inbound" value="<?= $e($opt('status_map_inbound')) ?>">
+            <input type="hidden" name="o_custom_field_map" value="<?= $e($opt('custom_field_map')) ?>">
         </section>
 
         <section class="at-box">

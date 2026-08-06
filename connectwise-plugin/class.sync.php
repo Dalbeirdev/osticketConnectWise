@@ -407,8 +407,35 @@ class SyncEngine
             $atStatus = $map0[mb_strtolower($statusName)];
         }
         $map = $this->mapper->findByOsticketId($ostId);
-        // Name parity outbound: an osTicket status named exactly like one of
-        // this tenant's ConnectWise statuses resolves automatically by label.
+        // BOARD-SCOPED name parity first: statuses are per-board in ConnectWise —
+        // "InProgress" on the NOC board has a different id than on the SOC board,
+        // and a foreign board's id is invalid for this ticket. Resolve the name
+        // against the TICKET'S OWN board (statuses cached per board per run).
+        if ($atStatus === null && $statusName !== '') {
+            try {
+                static $boardStatusCache = array();
+                $raw = $this->api->request('GET', "service/tickets/$atId");
+                $boardId = (int) ($raw['board']['id'] ?? 0);
+                if ($boardId) {
+                    if (!isset($boardStatusCache[$boardId])) {
+                        $boardStatusCache[$boardId] = $this->api->listBoardStatuses($boardId);
+                    }
+                    // Compare base names too, so osT "New (NOC)" matches board status "New".
+                    $base = mb_strtolower(trim(preg_replace('/\s*\([^)]*\)\s*$/', '', $statusName)));
+                    foreach ($boardStatusCache[$boardId] as $bs) {
+                        $bn = mb_strtolower(trim($bs['name']));
+                        if ($bn === mb_strtolower(trim($statusName)) || $bn === $base) {
+                            $atStatus = (int) $bs['id'];
+                            break;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                // fall through to the flat picklist cache
+            }
+        }
+        // Name parity outbound (legacy flat cache): an osTicket status named like
+        // one of this tenant's ConnectWise statuses resolves automatically by label.
         if ($atStatus === null && $statusName !== '') {
             $prefix2 = Installer::prefix();
             $r0 = db_query("SELECT value FROM `{$prefix2}connectwise_picklist_cache` "
@@ -826,6 +853,7 @@ class SyncEngine
             try {
                 $this->applyInboundStatus($ticket, $at);
                 $this->applyInboundPriority($ticket, $at);
+                $this->applyInboundCustomFields($ticket, (int) $at['id']);
             } catch (\Throwable $e) {
                 // non-fatal; ticket stays in its created state
             } finally {
@@ -944,6 +972,7 @@ class SyncEngine
         try {
             $this->applyInboundStatus($osTicket, $at);
             $this->applyInboundPriority($osTicket, $at);
+            $this->applyInboundCustomFields($osTicket, $atId);
             // Field parity: mirror the ConnectWise due date onto the osTicket
             // ticket (direct column update; no signals fired).
             if (!empty($at['dueDateTime'])) {
@@ -1006,6 +1035,31 @@ class SyncEngine
             return;
         }
         $atStatus = (int) $at['status'];
+
+        // Field Mappings screen (id -> id pairs) wins first: unambiguous even when
+        // several ConnectWise boards reuse the same status NAME with different ids.
+        $inMap = $this->settings->statusMapInbound();
+        if (isset($inMap[$atStatus])) {
+            try {
+                $st = \TicketStatus::lookup($inMap[$atStatus]);
+                if ($st) {
+                    if ((int) $osTicket->getStatusId() === (int) $st->getId()) {
+                        return; // already there
+                    }
+                    $osTicket->setStatus($st);
+                    if ((int) $osTicket->getStatusId() === (int) $st->getId()) {
+                        $this->logger->info('osTicket #' . $osTicket->getId()
+                            . " status -> '" . $st->getName() . "' (Field Mappings pair for CW status $atStatus)",
+                            array('category' => 'inbound', 'osticket_ticket_id' => $osTicket->getId()));
+                        return;
+                    }
+                    // not applied — fall through to the name-based paths below
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('Inbound status-map apply failed: ' . $e->getMessage(),
+                    array('category' => 'inbound', 'osticket_ticket_id' => $osTicket->getId()));
+            }
+        }
 
         // Single-dropdown design: reverse-translate through the per-client map
         // and set the exact osTicket status when one is defined for this value.
@@ -1189,6 +1243,60 @@ class SyncEngine
      * @param \Ticket $osTicket
      * @param array   $at ConnectWise ticket entity.
      */
+    /**
+     * Mirror ConnectWise CUSTOM FIELD values onto the mapped osTicket dynamic
+     * form fields (Field Mappings screen: cwUdfId=osT form_field id). The
+     * normalized ticket shape drops customFields, so fetch the raw ticket —
+     * only when a map is configured (zero API cost otherwise).
+     */
+    private function applyInboundCustomFields(\Ticket $osTicket, int $atId): void
+    {
+        $cfMap = $this->settings->customFieldMap();
+        if (!$cfMap) {
+            return;
+        }
+        try {
+            $raw = $this->api->request('GET', "service/tickets/$atId");
+            $values = array();
+            foreach ((array) ($raw['customFields'] ?? array()) as $cf) {
+                if (isset($cf['id'], $cf['value'])) {
+                    $values[(int) $cf['id']] = is_scalar($cf['value']) ? (string) $cf['value'] : json_encode($cf['value']);
+                }
+            }
+            if (!$values) {
+                return;
+            }
+            $tid = (int) $osTicket->getId();
+            $p = TABLE_PREFIX;
+            foreach ($cfMap as $cwId => $ostFieldId) {
+                if (!isset($values[$cwId])) {
+                    continue;
+                }
+                $val = $values[$cwId];
+                // Update the ticket's existing form-entry value row, else add one
+                // (same pattern the priority mirror uses).
+                $r = db_query("SELECT v.entry_id, v.field_id FROM {$p}form_entry_values v JOIN "
+                    . "{$p}form_entry e ON e.id=v.entry_id WHERE v.field_id=" . (int) $ostFieldId
+                    . " AND e.object_type='T' AND e.object_id=$tid LIMIT 1", false);
+                if ($r && ($fv = db_fetch_array($r))) {
+                    db_query("UPDATE {$p}form_entry_values SET value=" . db_input($val)
+                        . ' WHERE entry_id=' . (int) $fv['entry_id'] . ' AND field_id=' . (int) $ostFieldId, false);
+                } else {
+                    $r2 = db_query("SELECT e.id eid FROM {$p}form_entry e JOIN {$p}form_field f "
+                        . 'ON f.form_id=e.form_id WHERE f.id=' . (int) $ostFieldId
+                        . " AND e.object_type='T' AND e.object_id=$tid LIMIT 1", false);
+                    if ($r2 && ($fe = db_fetch_array($r2))) {
+                        db_query("INSERT INTO {$p}form_entry_values (entry_id, field_id, value) VALUES ("
+                            . (int) $fe['eid'] . ',' . (int) $ostFieldId . ',' . db_input($val) . ')', false);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('Custom-field mirror failed: ' . $e->getMessage(),
+                array('category' => 'inbound', 'osticket_ticket_id' => (int) $osTicket->getId()));
+        }
+    }
+
     private function applyInboundPriority(\Ticket $osTicket, array $at): void
     {
         if (!isset($at['priority'])) {
