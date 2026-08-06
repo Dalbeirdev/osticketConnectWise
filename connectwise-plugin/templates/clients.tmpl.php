@@ -147,8 +147,24 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
         </div>
 
         <?php $tf = isset($ticketFilters) ? $ticketFilters : array('state'=>'','status'=>0,'dept'=>0,'org'=>0,'cw'=>0);
-              $fo = isset($filterOptions) ? $filterOptions : array('statuses'=>array(),'depts'=>array(),'orgs'=>array(),'cw'=>array()); ?>
-        <form method="get" class="at-inline" style="margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:end">
+              $fo = isset($filterOptions) ? $filterOptions : array('statuses'=>array(),'depts'=>array(),'orgs'=>array(),'cw'=>array());
+              $anyFilter = ($tf['state'] !== '' || $tf['status'] || $tf['dept'] || $tf['org'] || $tf['cw']); ?>
+        <style>
+            .cwf{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;
+                 background:#f6f8fa;border:1px solid #e3e8ee;border-radius:8px;padding:10px 12px;margin:0 0 12px}
+            .cwf label{display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:600;
+                 letter-spacing:.05em;text-transform:uppercase;color:#6a7687}
+            .cwf select{min-width:120px;max-width:200px;padding:5px 8px;font-size:13px;color:#24292f;
+                 border:1px solid #d0d7de;border-radius:6px;background:#fff}
+            .cwf .cwf-end{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:#6a7687}
+            .cw-chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+            .cw-chip-open{background:#dcfce7;color:#166534}
+            .cw-chip-closed{background:#e5e7eb;color:#4b5563}
+            .cw-drift{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;
+                 background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;white-space:nowrap}
+            .cw-dim{color:#8a97a8;font-size:12px;white-space:nowrap}
+        </style>
+        <form method="get" class="cwf">
             <input type="hidden" name="view" value="clients">
             <input type="hidden" name="mode" value="tickets">
             <input type="hidden" name="id" value="<?= (int) $editing->id() ?>">
@@ -158,14 +174,14 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                     <option value="open"   <?= $tf['state']==='open'   ? 'selected' : '' ?>>Open</option>
                     <option value="closed" <?= $tf['state']==='closed' ? 'selected' : '' ?>>Closed</option>
                 </select></label>
-            <label>osTicket Status
+            <label>Status
                 <select name="f_status" onchange="this.form.submit()">
                     <option value="0">All</option>
                     <?php foreach ($fo['statuses'] as $v => $lbl): ?>
                         <option value="<?= (int) $v ?>" <?= (int) $tf['status'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
-            <label>Board / Department
+            <label>Board
                 <select name="f_dept" onchange="this.form.submit()">
                     <option value="0">All</option>
                     <?php foreach ($fo['depts'] as $v => $lbl): ?>
@@ -186,15 +202,18 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                         <option value="<?= (int) $v ?>" <?= (int) $tf['cw'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
-            <?php if ($tf['state'] !== '' || $tf['status'] || $tf['dept'] || $tf['org'] || $tf['cw']): ?>
-                <a class="at-btn at-btn-ghost at-btn-sm"
-                   href="connectwise.php?view=clients&amp;mode=tickets&amp;id=<?= (int) $editing->id() ?>">Reset</a>
-            <?php endif; ?>
+            <span class="cwf-end">
+                <?= count($clientTickets) ?> ticket<?= count($clientTickets) === 1 ? '' : 's' ?><?= $anyFilter ? ' (filtered)' : '' ?>
+                <?php if ($anyFilter): ?>
+                    <a class="at-btn at-btn-ghost at-btn-sm"
+                       href="connectwise.php?view=clients&amp;mode=tickets&amp;id=<?= (int) $editing->id() ?>">Reset</a>
+                <?php endif; ?>
+            </span>
         </form>
 
         <table class="at-table">
-            <thead><tr><th>osTicket #</th><th>Subject</th><th>Company</th><th>Board / Dept</th>
-                <th>osTicket Status</th><th>ConnectWise #</th><th>AT Status</th><th>Last Sync</th></tr></thead>
+            <thead><tr><th>osTicket #</th><th>Subject</th><th>Company</th><th>Board</th>
+                <th>Status</th><th>CW #</th><th>Last Sync</th></tr></thead>
             <tbody>
             <?php foreach ($clientTickets as $ct): ?>
                 <tr>
@@ -202,14 +221,19 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                     <td><?= $e(mb_strimwidth((string) $ct['subject'], 0, 55, '…')) ?></td>
                     <td><?= $e((string) ($ct['org_name'] ?? '')) ?></td>
                     <td><?= $e((string) ($ct['dept_name'] ?? '')) ?></td>
-                    <td><?= $e($ct['status']) ?></td>
+                    <td>
+                        <span class="cw-chip cw-chip-<?= ($ct['state'] ?? '') === 'closed' ? 'closed' : 'open' ?>"><?=
+                            $e($ct['status_disp'] !== '' ? $ct['status_disp'] : $ct['status']) ?></span>
+                        <?php if (!empty($ct['cw_mismatch'])): ?>
+                            <span class="cw-drift" title="ConnectWise shows a different status">CW: <?= $e($ct['cw_mismatch']) ?></span>
+                        <?php endif; ?>
+                    </td>
                     <td><?= $e($ct['connectwise_ticket_number']) ?></td>
-                    <td><?= $e($ct['connectwise_status']) ?></td>
-                    <td><?= $e($ct['last_sync_time']) ?></td>
+                    <td class="cw-dim"><?= $e($ct['last_sync_disp'] ?? $ct['last_sync_time']) ?></td>
                 </tr>
             <?php endforeach; ?>
             <?php if (!$clientTickets): ?>
-                <tr><td colspan="8" class="at-muted">No synced tickets match these filters.</td></tr>
+                <tr><td colspan="7" class="at-muted">No synced tickets match these filters.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>

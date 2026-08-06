@@ -147,7 +147,7 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
         <form method="post" class="at-inline">
             <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
             <input type="hidden" name="action" value="import_connectwise">
-            <label>Import open AT tickets (max)
+            <label>Import open CW tickets (max)
                 <input type="number" name="import_limit" value="25" min="1" max="200" class="at-num">
             </label>
             <button type="submit" class="at-btn at-btn-alt"
@@ -156,7 +156,7 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
         <form method="post" class="at-inline">
             <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
             <input type="hidden" name="action" value="import_one">
-            <label>Import AT ticket by ID
+            <label>Import CW ticket by ID
                 <input type="number" name="at_ticket_id" class="at-num" style="width:120px" placeholder="e.g. 300957">
             </label>
             <button type="submit" class="at-btn at-btn-alt">Import by ID</button>
@@ -297,7 +297,7 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
             <span class="at-count">(<?= count($audit) ?>)</span><span class="at-chev">&#9662;</span></h2>
         <div class="at-body">
         <table class="at-table">
-            <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>osTicket#</th><th>AT#</th></tr></thead>
+            <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>osTicket#</th><th>CW#</th></tr></thead>
             <tbody>
             <?php foreach ($audit as $a): ?>
                 <tr>
@@ -331,7 +331,7 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
             <a href="?level=info<?= $qsInst ?>" class="<?= ($_GET['level'] ?? '') === 'info' ? 'active' : '' ?>">Info</a>
         </div>
         <table class="at-table at-logs">
-            <thead><tr><th>Time</th><th>Level</th><th>Category</th><th>osTicket#</th><th>AT#</th><th>Message</th></tr></thead>
+            <thead><tr><th>Time</th><th>Level</th><th>Category</th><th>osTicket#</th><th>CW#</th><th>Message</th></tr></thead>
             <tbody>
             <?php foreach ($logs as $log): ?>
                 <tr class="lvl-<?= $e($log['level']) ?>">

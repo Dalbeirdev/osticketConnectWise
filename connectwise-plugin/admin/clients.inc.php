@@ -523,9 +523,31 @@ if ($mode === 'tickets') {
                 if ($name) { $filterOptions['cw'][$idv] = $name . " ($idv)"; }
             }
         } catch (\Throwable $e) { /* ids are fine */ }
+        // Display prep: statuses on both sides embed the board name ("New (NOC)")
+        // and the CW label carries the id — strip that noise for the table (the
+        // Board column already says where it lives) and flag only DISAGREEMENT
+        // between the two sides, which is the case an admin actually cares about.
+        $base = function (string $s): string {
+            do { $s2 = preg_replace('/\s*\([^()]*\)\s*$/', '', $s); $done = ($s2 === $s); $s = $s2; } while (!$done);
+            return trim($s);
+        };
         foreach ($clientTickets as &$ct) {
             $cid = (string) $ct['connectwise_status'];
-            if (isset($filterOptions['cw'][$cid])) { $ct['connectwise_status'] = $filterOptions['cw'][$cid]; }
+            $cwLabel = isset($filterOptions['cw'][$cid]) ? $filterOptions['cw'][$cid] : $cid;
+            $ct['status_disp'] = $base((string) $ct['status']);
+            $cwBase            = $base($cwLabel);
+            // Mismatch only when we KNOW the CW status name (numeric = unknown label),
+            // and never for the closure-synonym family: osTicket "Resolved"/"Closed"
+            // <-> ConnectWise "Completed" is the CONFIGURED closure mapping, not drift.
+            $canon = function (string $s): string {
+                $s = strtolower($s);
+                return in_array($s, array('resolved', 'completed', 'closed'), true) ? '~closed' : $s;
+            };
+            $ct['cw_mismatch'] = (!ctype_digit($cwBase) && $ct['status_disp'] !== ''
+                && $canon($ct['status_disp']) !== $canon($cwBase)) ? $cwBase : '';
+            $ct['connectwise_status'] = $cwLabel;
+            $ts = strtotime((string) $ct['last_sync_time']);
+            $ct['last_sync_disp'] = $ts ? date('M j, H:i', $ts) : (string) $ct['last_sync_time'];
         }
         unset($ct);
     }
