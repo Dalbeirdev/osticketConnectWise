@@ -324,6 +324,9 @@ class SyncEngine
     {
         $atId = $this->requireConnectWiseId($ostId);
         $map = $this->mapper->findByOsticketId($ostId);
+        // Mapped custom fields ride along on every outbound note/reply event, so
+        // an osTicket-side edit reaches ConnectWise with the next human update.
+        $this->pushCustomFieldsIfMapped($ostId, $atId);
         // attachments_only: the text already reached ConnectWise as a time-entry
         // summary; this job only carries the entry's files.
         if (empty($payload['attachments_only'])) {
@@ -485,6 +488,8 @@ class SyncEngine
         $this->mapper->touch((int) $map['id'], 'osticket', $this->mapper->computeHash($osTicket));
         $this->recordHistory($map['id'] ?? null, $ostId, $atId, 'to_connectwise', 'status', 'success',
             'Status ' . ($statusName !== '' ? "'$statusName'" : ($closed ? 'closed' : 'open')) . " -> AT $atStatus");
+        // Mapped custom fields ride along on every outbound status event.
+        $this->pushCustomFieldsIfMapped($ostId, $atId);
     }
 
     private function processPriorityUpdate(int $ostId): void
@@ -1243,6 +1248,60 @@ class SyncEngine
      * @param \Ticket $osTicket
      * @param array   $at ConnectWise ticket entity.
      */
+    /**
+     * OUTBOUND custom fields: push the mapped osTicket form-field values to the
+     * ConnectWise ticket whenever they differ. Piggybacks on outbound events
+     * (status/note pushes) — zero API cost when no custom-field map exists.
+     */
+    private function pushCustomFieldsIfMapped(int $ostId, int $atId): void
+    {
+        $cfMap = $this->settings->customFieldMap();
+        if (!$cfMap) {
+            return;
+        }
+        try {
+            $p = TABLE_PREFIX;
+            $local = array();
+            foreach ($cfMap as $cwId => $ostFieldId) {
+                $r = db_query("SELECT v.value FROM {$p}form_entry_values v JOIN {$p}form_entry e "
+                    . 'ON e.id=v.entry_id WHERE v.field_id=' . (int) $ostFieldId
+                    . " AND e.object_type='T' AND e.object_id=$ostId LIMIT 1", false);
+                if ($r && ($x = db_fetch_array($r))) {
+                    $local[(int) $cwId] = (string) $x['value'];
+                }
+            }
+            if (!$local) {
+                return;
+            }
+            $raw = $this->api->request('GET', "service/tickets/$atId");
+            $remote = array();
+            $merged = array();
+            foreach ((array) ($raw['customFields'] ?? array()) as $cf) {
+                if (!isset($cf['id'])) { continue; }
+                $remote[(int) $cf['id']] = isset($cf['value']) && is_scalar($cf['value']) ? (string) $cf['value'] : '';
+                $merged[(int) $cf['id']] = $cf; // keep untouched fields as-is
+            }
+            $dirty = false;
+            foreach ($local as $cwId => $val) {
+                if (($remote[$cwId] ?? null) !== $val) {
+                    $merged[$cwId] = array('id' => $cwId, 'value' => $val);
+                    $dirty = true;
+                }
+            }
+            if (!$dirty) {
+                return;
+            }
+            $this->api->request('PATCH', "service/tickets/$atId", array(
+                array('op' => 'replace', 'path' => 'customFields', 'value' => array_values($merged)),
+            ));
+            $this->logger->info("Custom fields pushed to ConnectWise #$atId",
+                array('category' => 'outbound', 'osticket_ticket_id' => $ostId));
+        } catch (\Throwable $e) {
+            $this->logger->warning('Custom-field push failed: ' . $e->getMessage(),
+                array('category' => 'outbound', 'osticket_ticket_id' => $ostId));
+        }
+    }
+
     /**
      * Mirror ConnectWise CUSTOM FIELD values onto the mapped osTicket dynamic
      * form fields (Field Mappings screen: cwUdfId=osT form_field id). The
