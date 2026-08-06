@@ -452,8 +452,12 @@ if ($mode === 'edit') {
     }
 }
 
-// "Tickets" sub-view: the client's mapped tickets, newest activity first.
+// "Tickets" sub-view: the client's mapped tickets, newest activity first, with
+// admin filters (company/organization, board via department routing, open/closed
+// state, osTicket status, ConnectWise status).
 $clientTickets = array();
+$ticketFilters = array('state' => '', 'status' => 0, 'dept' => 0, 'org' => 0, 'cw' => 0);
+$filterOptions = array('statuses' => array(), 'depts' => array(), 'orgs' => array(), 'cw' => array());
 if ($mode === 'tickets') {
     $editing = $repo->find((int) ($_GET['id'] ?? 0));
     if (!$editing) {
@@ -461,18 +465,69 @@ if ($mode === 'tickets') {
         $error = $error ?: 'Client not found.';
     } else {
         $prefix = \ConnectWise\Installer::prefix();
-        $res = db_query(
-            'SELECT osticket_ticket_id, connectwise_ticket_number, connectwise_status, last_sync_time '
-            . "FROM `{$prefix}connectwise_ticket_map` WHERE instance_id=" . $editing->id()
-            . ' ORDER BY updated DESC LIMIT 50'
+        $iid    = (int) $editing->id();
+
+        $ticketFilters = array(
+            'state'  => in_array($_GET['f_state'] ?? '', array('open', 'closed'), true) ? $_GET['f_state'] : '',
+            'status' => (int) ($_GET['f_status'] ?? 0),
+            'dept'   => (int) ($_GET['f_dept'] ?? 0),
+            'org'    => (int) ($_GET['f_org'] ?? 0),
+            'cw'     => (int) ($_GET['f_cw'] ?? 0),
         );
+
+        // One join instead of a per-row Ticket::lookup; every filter is applied
+        // in SQL so the LIMIT stays meaningful.
+        $joins =
+            "FROM `{$prefix}connectwise_ticket_map` m "
+            . "JOIN `{$prefix}ticket` t ON t.ticket_id = m.osticket_ticket_id "
+            . "LEFT JOIN `{$prefix}ticket_status` s ON s.id = t.status_id "
+            . "LEFT JOIN `{$prefix}department` d ON d.id = t.dept_id "
+            . "LEFT JOIN `{$prefix}user` u ON u.id = t.user_id "
+            . "LEFT JOIN `{$prefix}organization` o ON o.id = u.org_id "
+            . "LEFT JOIN `{$prefix}ticket__cdata` c ON c.ticket_id = t.ticket_id ";
+        $where = "WHERE m.instance_id=$iid";
+        if ($ticketFilters['state'] !== '') { $where .= " AND s.state='" . $ticketFilters['state'] . "'"; }
+        if ($ticketFilters['status'])       { $where .= ' AND t.status_id=' . $ticketFilters['status']; }
+        if ($ticketFilters['dept'])         { $where .= ' AND t.dept_id=' . $ticketFilters['dept']; }
+        if ($ticketFilters['org'])          { $where .= ' AND u.org_id=' . $ticketFilters['org']; }
+        if ($ticketFilters['cw'])           { $where .= ' AND m.connectwise_status=' . $ticketFilters['cw']; }
+
+        $res = db_query(
+            'SELECT m.osticket_ticket_id, m.connectwise_ticket_number, m.connectwise_status, m.last_sync_time, '
+            . 't.number, c.subject, s.name AS status_name, s.state, d.name AS dept_name, o.name AS org_name '
+            . $joins . $where . ' ORDER BY m.updated DESC LIMIT 50', false);
         while ($res && ($row = db_fetch_array($res))) {
-            $t = \Ticket::lookup((int) $row['osticket_ticket_id']);
-            $row['number']  = $t ? (string) $t->getNumber() : (string) $row['osticket_ticket_id'];
-            $row['subject'] = ($t && method_exists($t, 'getSubject')) ? (string) $t->getSubject() : '';
-            $row['status']  = ($t && is_object($t->getStatus())) ? (string) $t->getStatus() : '';
+            $row['status'] = (string) ($row['status_name'] ?? '');
             $clientTickets[] = $row;
         }
+
+        // Dropdown options: only values that actually occur in THIS client's
+        // mapped tickets, so the filters never offer dead choices.
+        $optQ = function (string $select, string $group) use ($joins, $iid) {
+            $out = array();
+            $r = db_query("SELECT DISTINCT $select $joins WHERE m.instance_id=$iid $group", false);
+            while ($r && ($x = db_fetch_row($r))) {
+                if ($x[0] !== null && $x[0] !== '') { $out[(string) $x[0]] = (string) ($x[1] ?? $x[0]); }
+            }
+            return $out;
+        };
+        $filterOptions['statuses'] = $optQ('t.status_id, s.name', 'ORDER BY s.name');
+        $filterOptions['depts']    = $optQ('t.dept_id, d.name', 'ORDER BY d.name');
+        $filterOptions['orgs']     = $optQ('u.org_id, o.name', 'AND u.org_id IS NOT NULL ORDER BY o.name');
+        $filterOptions['cw']       = $optQ('m.connectwise_status, m.connectwise_status', 'ORDER BY 1');
+        // ConnectWise status ids -> names via the picklist cache when available.
+        try {
+            $pk = $facade->container()->plugin()->getContainerFor($iid)->picklists();
+            foreach ($filterOptions['cw'] as $idv => $lbl) {
+                $name = $pk->labelByValue('status', (string) $idv);
+                if ($name) { $filterOptions['cw'][$idv] = $name . " ($idv)"; }
+            }
+        } catch (\Throwable $e) { /* ids are fine */ }
+        foreach ($clientTickets as &$ct) {
+            $cid = (string) $ct['connectwise_status'];
+            if (isset($filterOptions['cw'][$cid])) { $ct['connectwise_status'] = $filterOptions['cw'][$cid]; }
+        }
+        unset($ct);
     }
 }
 

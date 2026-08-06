@@ -145,13 +145,63 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
             <div><h2><?= $e($editing->name()) ?> <span class="at-code" style="font-size:11px;padding:3px 6px"><?= $e($editing->code()) ?></span></h2>
                 <div class="at-box-sub">Last 50 synced tickets, newest activity first &mdash; click a number to open it</div></div>
         </div>
+
+        <?php $tf = isset($ticketFilters) ? $ticketFilters : array('state'=>'','status'=>0,'dept'=>0,'org'=>0,'cw'=>0);
+              $fo = isset($filterOptions) ? $filterOptions : array('statuses'=>array(),'depts'=>array(),'orgs'=>array(),'cw'=>array()); ?>
+        <form method="get" class="at-inline" style="margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:end">
+            <input type="hidden" name="view" value="clients">
+            <input type="hidden" name="mode" value="tickets">
+            <input type="hidden" name="id" value="<?= (int) $editing->id() ?>">
+            <label>Open / Closed
+                <select name="f_state" onchange="this.form.submit()">
+                    <option value="">All</option>
+                    <option value="open"   <?= $tf['state']==='open'   ? 'selected' : '' ?>>Open</option>
+                    <option value="closed" <?= $tf['state']==='closed' ? 'selected' : '' ?>>Closed</option>
+                </select></label>
+            <label>osTicket Status
+                <select name="f_status" onchange="this.form.submit()">
+                    <option value="0">All</option>
+                    <?php foreach ($fo['statuses'] as $v => $lbl): ?>
+                        <option value="<?= (int) $v ?>" <?= (int) $tf['status'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                    <?php endforeach; ?>
+                </select></label>
+            <label>Board / Department
+                <select name="f_dept" onchange="this.form.submit()">
+                    <option value="0">All</option>
+                    <?php foreach ($fo['depts'] as $v => $lbl): ?>
+                        <option value="<?= (int) $v ?>" <?= (int) $tf['dept'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                    <?php endforeach; ?>
+                </select></label>
+            <label>Company
+                <select name="f_org" onchange="this.form.submit()">
+                    <option value="0">All</option>
+                    <?php foreach ($fo['orgs'] as $v => $lbl): ?>
+                        <option value="<?= (int) $v ?>" <?= (int) $tf['org'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                    <?php endforeach; ?>
+                </select></label>
+            <label>ConnectWise Status
+                <select name="f_cw" onchange="this.form.submit()">
+                    <option value="0">All</option>
+                    <?php foreach ($fo['cw'] as $v => $lbl): ?>
+                        <option value="<?= (int) $v ?>" <?= (int) $tf['cw'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                    <?php endforeach; ?>
+                </select></label>
+            <?php if ($tf['state'] !== '' || $tf['status'] || $tf['dept'] || $tf['org'] || $tf['cw']): ?>
+                <a class="at-btn at-btn-ghost at-btn-sm"
+                   href="connectwise.php?view=clients&amp;mode=tickets&amp;id=<?= (int) $editing->id() ?>">Reset</a>
+            <?php endif; ?>
+        </form>
+
         <table class="at-table">
-            <thead><tr><th>osTicket #</th><th>Subject</th><th>osTicket Status</th><th>ConnectWise #</th><th>AT Status</th><th>Last Sync</th></tr></thead>
+            <thead><tr><th>osTicket #</th><th>Subject</th><th>Company</th><th>Board / Dept</th>
+                <th>osTicket Status</th><th>ConnectWise #</th><th>AT Status</th><th>Last Sync</th></tr></thead>
             <tbody>
             <?php foreach ($clientTickets as $ct): ?>
                 <tr>
                     <td><a href="tickets.php?id=<?= (int) $ct['osticket_ticket_id'] ?>">#<?= $e($ct['number']) ?></a></td>
-                    <td><?= $e(mb_strimwidth((string) $ct['subject'], 0, 70, '…')) ?></td>
+                    <td><?= $e(mb_strimwidth((string) $ct['subject'], 0, 55, '…')) ?></td>
+                    <td><?= $e((string) ($ct['org_name'] ?? '')) ?></td>
+                    <td><?= $e((string) ($ct['dept_name'] ?? '')) ?></td>
                     <td><?= $e($ct['status']) ?></td>
                     <td><?= $e($ct['connectwise_ticket_number']) ?></td>
                     <td><?= $e($ct['connectwise_status']) ?></td>
@@ -159,7 +209,7 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                 </tr>
             <?php endforeach; ?>
             <?php if (!$clientTickets): ?>
-                <tr><td colspan="6" class="at-muted">No synced tickets for this client yet.</td></tr>
+                <tr><td colspan="8" class="at-muted">No synced tickets match these filters.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
