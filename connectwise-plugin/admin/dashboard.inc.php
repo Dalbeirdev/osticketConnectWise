@@ -88,6 +88,25 @@ try {
 } catch (\Throwable $e) {
     $instances = array();
 }
+// Credentials, connection status and two-way live PER CLIENT — the global config
+// is empty. So the header (Test Connection / Connection badge / Two-way / stats)
+// must reflect a real client, not the empty global config. When no client is
+// explicitly selected, default to the first ENABLED client so the dashboard shows
+// the true connection status instead of a misleading "Site URL is required".
+if ($instFilter <= 0) {
+    try {
+        $enabled = $facade->container()->instanceRepository()->allEnabled();
+        $pick    = !empty($enabled) ? $enabled : $instances;
+        if (!empty($pick)) {
+            $first = reset($pick);
+            $instFilter = (int) (is_object($first) && method_exists($first, 'id')
+                ? $first->id()
+                : (is_array($first) ? ($first['id'] ?? 0) : 0));
+        }
+    } catch (\Throwable $e) {
+        // If we can't resolve a client, fall back to the global container.
+    }
+}
 if ($instFilter > 0 && method_exists($plugin, 'getContainerFor')) {
     $facade = new \ConnectWise\ConnectWise($plugin->getContainerFor($instFilter));
 }
