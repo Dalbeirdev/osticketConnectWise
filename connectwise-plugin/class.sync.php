@@ -875,8 +875,27 @@ class SyncEngine
         if ($this->mapper->findByConnectWiseId((int) $at['id'])) {
             return;
         }
-        // createOsticketFromConnectWise manages its own suppress window.
-        $this->createOsticketFromConnectWise($at);
+        // The check above is not atomic: two overlapping cron runs importing the
+        // same ConnectWise ticket in the same second both pass it and create TWO
+        // osTicket twins (observed live: CW #551 -> osT #14 + #15). Serialize per
+        // CW id with a MySQL advisory lock; the loser skips — the winner's row is
+        // found on the next tick if anything else remains.
+        // (Lock is keyed by CW id only: a cross-tenant collision on the same id
+        // just defers one tenant's import to the next tick — it never drops it.)
+        $lockName = 'cwimport_' . (int) $at['id'];
+        $got = db_fetch_row(db_query("SELECT GET_LOCK('" . db_real_escape($lockName) . "', 0)", false));
+        if (!$got || (int) $got[0] !== 1) {
+            return; // another worker is importing this exact ticket right now
+        }
+        try {
+            if ($this->mapper->findByConnectWiseId((int) $at['id'])) {
+                return; // the racer finished while we waited for the lock
+            }
+            // createOsticketFromConnectWise manages its own suppress window.
+            $this->createOsticketFromConnectWise($at);
+        } finally {
+            db_query("SELECT RELEASE_LOCK('" . db_real_escape($lockName) . "')", false);
+        }
     }
 
     /**
