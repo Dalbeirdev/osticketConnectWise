@@ -467,16 +467,10 @@ if ($mode === 'tickets') {
         $prefix = \ConnectWise\Installer::prefix();
         $iid    = (int) $editing->id();
 
-        $ticketFilters = array(
-            'state'  => in_array($_GET['f_state'] ?? '', array('open', 'closed'), true) ? $_GET['f_state'] : '',
-            'status' => (int) ($_GET['f_status'] ?? 0),
-            'dept'   => (int) ($_GET['f_dept'] ?? 0),
-            'org'    => (int) ($_GET['f_org'] ?? 0),
-            'cw'     => (int) ($_GET['f_cw'] ?? 0),
-        );
-
-        // One join instead of a per-row Ticket::lookup; every filter is applied
-        // in SQL so the LIMIT stays meaningful.
+        // Filtering happens CLIENT-SIDE (instant, no page reload): load the last
+        // 200 mapped tickets once, stamp each row with its filter keys, and let
+        // the toolbar's JS show/hide rows. $ticketFilters stays for the template
+        // default state only.
         $joins =
             "FROM `{$prefix}connectwise_ticket_map` m "
             . "JOIN `{$prefix}ticket` t ON t.ticket_id = m.osticket_ticket_id "
@@ -485,17 +479,12 @@ if ($mode === 'tickets') {
             . "LEFT JOIN `{$prefix}user` u ON u.id = t.user_id "
             . "LEFT JOIN `{$prefix}organization` o ON o.id = u.org_id "
             . "LEFT JOIN `{$prefix}ticket__cdata` c ON c.ticket_id = t.ticket_id ";
-        $where = "WHERE m.instance_id=$iid";
-        if ($ticketFilters['state'] !== '') { $where .= " AND s.state='" . $ticketFilters['state'] . "'"; }
-        if ($ticketFilters['status'])       { $where .= ' AND t.status_id=' . $ticketFilters['status']; }
-        if ($ticketFilters['dept'])         { $where .= ' AND t.dept_id=' . $ticketFilters['dept']; }
-        if ($ticketFilters['org'])          { $where .= ' AND u.org_id=' . $ticketFilters['org']; }
-        if ($ticketFilters['cw'])           { $where .= ' AND m.connectwise_status=' . $ticketFilters['cw']; }
 
         $res = db_query(
             'SELECT m.osticket_ticket_id, m.connectwise_ticket_number, m.connectwise_status, m.last_sync_time, '
-            . 't.number, c.subject, s.name AS status_name, s.state, d.name AS dept_name, o.name AS org_name '
-            . $joins . $where . ' ORDER BY m.updated DESC LIMIT 50', false);
+            . 't.number, t.status_id, t.dept_id, u.org_id, c.subject, '
+            . 's.name AS status_name, s.state, d.name AS dept_name, o.name AS org_name '
+            . $joins . "WHERE m.instance_id=$iid ORDER BY m.updated DESC LIMIT 200", false);
         while ($res && ($row = db_fetch_array($res))) {
             $row['status'] = (string) ($row['status_name'] ?? '');
             $clientTickets[] = $row;
@@ -533,6 +522,7 @@ if ($mode === 'tickets') {
         };
         foreach ($clientTickets as &$ct) {
             $cid = (string) $ct['connectwise_status'];
+            $ct['cw_id'] = $cid; // raw id — the client-side filter matches on this
             $cwLabel = isset($filterOptions['cw'][$cid]) ? $filterOptions['cw'][$cid] : $cid;
             $ct['status_disp'] = $base((string) $ct['status']);
             $cwBase            = $base($cwLabel);

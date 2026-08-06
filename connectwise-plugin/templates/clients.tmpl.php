@@ -143,12 +143,10 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
         <div class="at-box-h">
             <span class="at-ico" style="background:#1f6feb"><i class="icon-list"></i></span>
             <div><h2><?= $e($editing->name()) ?> <span class="at-code" style="font-size:11px;padding:3px 6px"><?= $e($editing->code()) ?></span></h2>
-                <div class="at-box-sub">Last 50 synced tickets, newest activity first &mdash; click a number to open it</div></div>
+                <div class="at-box-sub">Last 200 synced tickets, newest activity first — filters apply instantly &mdash; click a number to open it</div></div>
         </div>
 
-        <?php $tf = isset($ticketFilters) ? $ticketFilters : array('state'=>'','status'=>0,'dept'=>0,'org'=>0,'cw'=>0);
-              $fo = isset($filterOptions) ? $filterOptions : array('statuses'=>array(),'depts'=>array(),'orgs'=>array(),'cw'=>array());
-              $anyFilter = ($tf['state'] !== '' || $tf['status'] || $tf['dept'] || $tf['org'] || $tf['cw']); ?>
+        <?php $fo = isset($filterOptions) ? $filterOptions : array('statuses'=>array(),'depts'=>array(),'orgs'=>array(),'cw'=>array()); ?>
         <style>
             .cwf{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;
                  background:#f6f8fa;border:1px solid #e3e8ee;border-radius:8px;padding:10px 12px;margin:0 0 12px}
@@ -164,59 +162,57 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                  background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;white-space:nowrap}
             .cw-dim{color:#8a97a8;font-size:12px;white-space:nowrap}
         </style>
-        <form method="get" class="cwf">
-            <input type="hidden" name="view" value="clients">
-            <input type="hidden" name="mode" value="tickets">
-            <input type="hidden" name="id" value="<?= (int) $editing->id() ?>">
+        <div class="cwf" id="cwFilters">
             <label>Open / Closed
-                <select name="f_state" onchange="this.form.submit()">
+                <select data-key="state">
                     <option value="">All</option>
-                    <option value="open"   <?= $tf['state']==='open'   ? 'selected' : '' ?>>Open</option>
-                    <option value="closed" <?= $tf['state']==='closed' ? 'selected' : '' ?>>Closed</option>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
                 </select></label>
             <label>Status
-                <select name="f_status" onchange="this.form.submit()">
-                    <option value="0">All</option>
+                <select data-key="status">
+                    <option value="">All</option>
                     <?php foreach ($fo['statuses'] as $v => $lbl): ?>
-                        <option value="<?= (int) $v ?>" <?= (int) $tf['status'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                        <option value="<?= (int) $v ?>"><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
             <label>Board
-                <select name="f_dept" onchange="this.form.submit()">
-                    <option value="0">All</option>
+                <select data-key="dept">
+                    <option value="">All</option>
                     <?php foreach ($fo['depts'] as $v => $lbl): ?>
-                        <option value="<?= (int) $v ?>" <?= (int) $tf['dept'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                        <option value="<?= (int) $v ?>"><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
             <label>Company
-                <select name="f_org" onchange="this.form.submit()">
-                    <option value="0">All</option>
+                <select data-key="org">
+                    <option value="">All</option>
                     <?php foreach ($fo['orgs'] as $v => $lbl): ?>
-                        <option value="<?= (int) $v ?>" <?= (int) $tf['org'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                        <option value="<?= (int) $v ?>"><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
             <label>ConnectWise Status
-                <select name="f_cw" onchange="this.form.submit()">
-                    <option value="0">All</option>
+                <select data-key="cw">
+                    <option value="">All</option>
                     <?php foreach ($fo['cw'] as $v => $lbl): ?>
-                        <option value="<?= (int) $v ?>" <?= (int) $tf['cw'] === (int) $v ? 'selected' : '' ?>><?= $e($lbl) ?></option>
+                        <option value="<?= (int) $v ?>"><?= $e($lbl) ?></option>
                     <?php endforeach; ?>
                 </select></label>
             <span class="cwf-end">
-                <?= count($clientTickets) ?> ticket<?= count($clientTickets) === 1 ? '' : 's' ?><?= $anyFilter ? ' (filtered)' : '' ?>
-                <?php if ($anyFilter): ?>
-                    <a class="at-btn at-btn-ghost at-btn-sm"
-                       href="connectwise.php?view=clients&amp;mode=tickets&amp;id=<?= (int) $editing->id() ?>">Reset</a>
-                <?php endif; ?>
+                <span id="cwCount"><?= count($clientTickets) ?> ticket<?= count($clientTickets) === 1 ? '' : 's' ?></span>
+                <button type="button" id="cwReset" class="at-btn at-btn-ghost at-btn-sm" style="display:none">Reset</button>
             </span>
-        </form>
+        </div>
 
-        <table class="at-table">
+        <table class="at-table" id="cwTickets">
             <thead><tr><th>osTicket #</th><th>Subject</th><th>Company</th><th>Board</th>
                 <th>Status</th><th>CW #</th><th>Last Sync</th></tr></thead>
             <tbody>
             <?php foreach ($clientTickets as $ct): ?>
-                <tr>
+                <tr data-state="<?= $e((string) ($ct['state'] ?? '')) ?>"
+                    data-status="<?= (int) ($ct['status_id'] ?? 0) ?>"
+                    data-dept="<?= (int) ($ct['dept_id'] ?? 0) ?>"
+                    data-org="<?= (int) ($ct['org_id'] ?? 0) ?>"
+                    data-cw="<?= (int) ($ct['cw_id'] ?? 0) ?>">
                     <td><a href="tickets.php?id=<?= (int) $ct['osticket_ticket_id'] ?>">#<?= $e($ct['number']) ?></a></td>
                     <td><?= $e(mb_strimwidth((string) $ct['subject'], 0, 55, '…')) ?></td>
                     <td><?= $e((string) ($ct['org_name'] ?? '')) ?></td>
@@ -232,11 +228,48 @@ $chk = static function (string $key, bool $default = false) use ($icfg): string 
                     <td class="cw-dim"><?= $e($ct['last_sync_disp'] ?? $ct['last_sync_time']) ?></td>
                 </tr>
             <?php endforeach; ?>
-            <?php if (!$clientTickets): ?>
-                <tr><td colspan="7" class="at-muted">No synced tickets match these filters.</td></tr>
-            <?php endif; ?>
+                <tr id="cwEmpty" style="<?= $clientTickets ? 'display:none' : '' ?>">
+                    <td colspan="7" class="at-muted">No synced tickets match these filters.</td></tr>
             </tbody>
         </table>
+        <script>
+        (function () {
+            // Instant, no-reload filtering: every row carries its filter keys as
+            // data attributes; the selects just show/hide rows and keep the count
+            // honest. Reset appears only while a filter is active.
+            var box = document.getElementById('cwFilters');
+            if (!box) return;
+            var selects = box.querySelectorAll('select[data-key]');
+            var rows = document.querySelectorAll('#cwTickets tbody tr:not(#cwEmpty)');
+            var empty = document.getElementById('cwEmpty');
+            var count = document.getElementById('cwCount');
+            var reset = document.getElementById('cwReset');
+
+            function apply() {
+                var active = {}, any = false;
+                selects.forEach(function (s) {
+                    if (s.value !== '') { active[s.getAttribute('data-key')] = s.value; any = true; }
+                });
+                var shown = 0;
+                rows.forEach(function (r) {
+                    var ok = true;
+                    for (var k in active) {
+                        if ((r.getAttribute('data-' + k) || '') !== active[k]) { ok = false; break; }
+                    }
+                    r.style.display = ok ? '' : 'none';
+                    if (ok) shown++;
+                });
+                if (empty) empty.style.display = shown ? 'none' : '';
+                if (count) count.textContent = shown + ' ticket' + (shown === 1 ? '' : 's') + (any ? ' (filtered)' : '');
+                if (reset) reset.style.display = any ? '' : 'none';
+            }
+            selects.forEach(function (s) { s.addEventListener('change', apply); });
+            if (reset) reset.addEventListener('click', function () {
+                selects.forEach(function (s) { s.value = ''; });
+                apply();
+            });
+        })();
+        </script>
     </section>
 
 <?php else: ?>
