@@ -140,37 +140,11 @@ class SyncEngine
             ? $entryTitle
             : ($poster !== '' ? $poster : ($isNote ? 'Internal Note' : 'Reply'));
 
-        // A public REPLY is a customer-facing message: it must always reach the
-        // ConnectWise discussion, even when time is logged alongside it. Only an
-        // INTERNAL note that carries inline time is treated as the time-work
-        // description — there the TIME ENTRY holds the text and a separate note
-        // would duplicate it, so it is suppressed.
-        try {
-            $f = $this->settings->timeFieldNames();
-            $spent = $_POST[$f['spent']] ?? null;
-            if ($isNote && $this->settings->captureTimeEnabled() && is_numeric($spent) && (float) $spent > 0) {
-                // Text rides the time entry — but the entry's FILES must still
-                // reach ConnectWise: queue an attachments-only job when present.
-                $hasFiles = false;
-                try {
-                    $hasFiles = method_exists($entry, 'getAttachments')
-                        && count($entry->getAttachments()) > 0;
-                } catch (\Throwable $e) {
-                    // ignore
-                }
-                if ($hasFiles) {
-                    $this->queue->enqueue($isNote ? 'note' : 'reply', 'append', $ticketId, array(
-                        'attachments_only' => 1,
-                        'entry_id' => method_exists($entry, 'getId') ? (int) $entry->getId() : 0,
-                    ));
-                }
-                $this->logger->debug("Note suppressed for osTicket #$ticketId: text carried by the time entry",
-                    array('category' => 'outbound', 'osticket_ticket_id' => $ticketId));
-                return;
-            }
-        } catch (\Throwable $e) {
-            // fall through — better a duplicate than a lost update
-        }
+        // Every human update reaches the ConnectWise discussion (user policy):
+        // public replies as customer-visible notes, internal notes as internal
+        // notes — EVEN when time is logged on the same submission. The time
+        // entry is captured separately (captureFromThreadEntry) and also carries
+        // the text as its summary, so the ticket's Time tab stays self-contained.
 
         $payload = array(
             'title'    => $title,
