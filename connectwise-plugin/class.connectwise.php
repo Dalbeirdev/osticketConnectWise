@@ -690,6 +690,126 @@ class ConnectWise
         return $this->c->audit()->recent($limit);
     }
 
+    /**
+     * Tickets NOT yet synced, both directions:
+     *  - 'osticket':    osTicket tickets with no ConnectWise twin (never queued,
+     *                   still pending, or whose create job failed/died) + reason.
+     *  - 'connectwise': ConnectWise tickets that PASS the admin-defined Import
+     *                   Filters (board/company/status/member scoping) but have no
+     *                   local twin — i.e. what a bulk import would bring in.
+     *
+     * @return array{osticket:array,connectwise:array,cw_error:?string}
+     */
+    public function unsyncedReport(int $limit = 25): array
+    {
+        $prefix = Installer::prefix();
+        $limit  = max(1, min(100, $limit));
+
+        // ---- osTicket side ----
+        $ost = array();
+        $res = db_query(
+            "SELECT t.ticket_id, t.number, t.created, c.subject, m.id AS map_id "
+            . "FROM `{$prefix}ticket` t "
+            . "LEFT JOIN `{$prefix}ticket__cdata` c ON c.ticket_id = t.ticket_id "
+            . "LEFT JOIN `{$prefix}connectwise_ticket_map` m ON m.osticket_ticket_id = t.ticket_id "
+            . "WHERE m.id IS NULL OR m.connectwise_ticket_id IS NULL "
+            . "ORDER BY t.ticket_id DESC LIMIT $limit", false);
+        while ($res && ($r = db_fetch_array($res))) {
+            $ostId  = (int) $r['ticket_id'];
+            $reason = $r['map_id'] ? 'mapped — ConnectWise ticket not created yet' : 'never queued for sync';
+            $j = db_fetch_array(db_query(
+                "SELECT status, LEFT(COALESCE(last_error,''),160) e "
+                . "FROM `{$prefix}connectwise_sync_queue` "
+                . "WHERE osticket_ticket_id=$ostId AND entity_type='ticket' AND action='create' "
+                . 'ORDER BY id DESC LIMIT 1', false));
+            if ($j) {
+                $reason = $j['status'] === 'pending' ? 'queued — waiting for next sync'
+                    : ($j['status'] === 'processing' ? 'sync in progress'
+                    : ($j['e'] !== '' ? $j['status'] . ': ' . $j['e'] : (string) $j['status']));
+            }
+            $ost[] = array(
+                'ticket_id' => $ostId,
+                'number'    => (string) $r['number'],
+                'subject'   => (string) ($r['subject'] ?? ''),
+                'created'   => (string) $r['created'],
+                'reason'    => $reason,
+            );
+        }
+
+        // ---- ConnectWise side (always through the admin Import Filters) ----
+        $cw = array();
+        $cwError = null;
+        try {
+            $spec = $this->c->settings()->importFilterSpec();
+            foreach ($this->c->api()->queryTicketsForImport($spec, $limit + 50) as $at) {
+                if (empty($at['id']) || $this->c->mapper()->findByConnectWiseId((int) $at['id'])) {
+                    continue;
+                }
+                $status = (string) ($at['status'] ?? '');
+                $board  = (string) ($at['queueID'] ?? '');
+                // Friendly labels when the picklist cache knows them; ids otherwise.
+                try {
+                    $p = $this->c->picklists();
+                    $status = $p->labelByValue('status', $status) ?: $status;
+                    $board  = $p->labelByValue('queue', $board) ?: $board;
+                } catch (\Throwable $e) {
+                    // ids are fine
+                }
+                $cw[] = array(
+                    'id'     => (int) $at['id'],
+                    'title'  => (string) ($at['title'] ?? ''),
+                    'status' => $status,
+                    'board'  => $board,
+                );
+                if (count($cw) >= $limit) {
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            $cwError = $e->getMessage();
+        }
+
+        return array('osticket' => $ost, 'connectwise' => $cw, 'cw_error' => $cwError);
+    }
+
+    /**
+     * Re-sync ONE osTicket ticket to ConnectWise: creates the mapping if missing,
+     * revives any failed/dead create job (enqueue is ON-DUPLICATE-KEY idempotent),
+     * processes the queue immediately and reports the outcome.
+     *
+     * @return array{ok:bool,message:string}
+     */
+    public function resyncOsticket(int $ostId): array
+    {
+        $t = \Ticket::lookup($ostId);
+        if (!$t) {
+            return array('ok' => false, 'message' => "osTicket #$ostId not found.");
+        }
+        $map = $this->c->mapper()->findByOsticketId($ostId);
+        if ($map && !empty($map['connectwise_ticket_id'])) {
+            return array('ok' => true,
+                'message' => 'already synced to ConnectWise #' . (int) $map['connectwise_ticket_id'] . '.');
+        }
+        if (!$map) {
+            $this->c->mapper()->createMapping($ostId, null,
+                $this->c->settings()->twoWayEnabled() ? 'bidirectional' : 'to_connectwise');
+        }
+        $this->c->queue()->enqueue('ticket', 'create', $ostId, array(), "ticket-create-$ostId");
+        $this->c->scheduler()->processQueue(10);
+
+        $map = $this->c->mapper()->findByOsticketId($ostId);
+        if ($map && !empty($map['connectwise_ticket_id'])) {
+            return array('ok' => true,
+                'message' => 'synced — ConnectWise #' . (int) $map['connectwise_ticket_id'] . ' created.');
+        }
+        $prefix = Installer::prefix();
+        $j = db_fetch_array(db_query(
+            "SELECT status, LEFT(COALESCE(last_error,''),200) e FROM `{$prefix}connectwise_sync_queue` "
+            . 'WHERE osticket_ticket_id=' . (int) $ostId . " AND entity_type='ticket' ORDER BY id DESC LIMIT 1", false));
+        return array('ok' => false, 'message' => 'attempted but not completed — '
+            . ($j ? $j['status'] . ($j['e'] !== '' ? ': ' . $j['e'] : '') : 'no queue record.'));
+    }
+
     public function container(): Container
     {
         return $this->c;

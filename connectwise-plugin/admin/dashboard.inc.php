@@ -179,6 +179,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     break;
 
+                case 'resync_ost':
+                    $oid = (int) ($_POST['ost_ticket_id'] ?? 0);
+                    if (!$oid) {
+                        $error = 'Missing osTicket id.';
+                    } else {
+                        $r = $facade->resyncOsticket($oid);
+                        if ($r['ok']) { $notice = "Resync osTicket #$oid: " . $r['message']; }
+                        else { $error = "Resync osTicket #$oid: " . $r['message']; }
+                    }
+                    break;
+
                 default:
                     $error = 'Unknown action.';
             }
@@ -210,6 +221,11 @@ $stats      = $facade->stats();
 $logs       = $facade->recentLogs(100, 0, $_GET['level'] ?? null);
 $failedJobs = $facade->failedJobs(50);
 $audit      = $facade->recentAudit(50);
+try {
+    $unsynced = $facade->unsyncedReport(25);
+} catch (\Throwable $e) {
+    $unsynced = array('osticket' => array(), 'connectwise' => array(), 'cw_error' => $e->getMessage());
+}
 $csrfToken  = $ost->getCSRF()->getToken();
 
 // Render inside the standard osTicket staff chrome (header/nav + footer) so

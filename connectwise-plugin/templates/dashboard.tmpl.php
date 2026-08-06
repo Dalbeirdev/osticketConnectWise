@@ -187,6 +187,73 @@ $atJs  = @file_get_contents(__DIR__ . '/../assets/js/connectwise.js');
         </table>
     </section>
 
+    <!-- Unsynced tickets (both directions) ---------------------------- -->
+    <?php $u = isset($unsynced) && is_array($unsynced)
+        ? $unsynced : array('osticket' => array(), 'connectwise' => array(), 'cw_error' => null); ?>
+    <section class="at-box">
+        <h2>Unsynced Tickets
+            <span class="at-count">(<?= count($u['osticket']) + count($u['connectwise']) ?>)</span></h2>
+
+        <h3 style="margin:10px 0 6px">osTicket &rarr; ConnectWise
+            <span class="at-count">(<?= count($u['osticket']) ?>)</span></h3>
+        <?php if (!$u['osticket']): ?>
+            <p class="at-muted">Every osTicket ticket has a ConnectWise twin. 🎉</p>
+        <?php else: ?>
+        <table class="at-table">
+            <thead><tr><th>osTicket #</th><th>Subject</th><th>Created</th><th>Why not synced</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($u['osticket'] as $r): ?>
+                <tr>
+                    <td><a href="tickets.php?id=<?= (int) $r['ticket_id'] ?>">#<?= $e($r['number']) ?></a></td>
+                    <td><?= $e(mb_strimwidth((string) $r['subject'], 0, 60, '…')) ?></td>
+                    <td><?= $e($r['created']) ?></td>
+                    <td class="at-err"><?= $e($r['reason']) ?></td>
+                    <td>
+                        <form method="post" class="at-inline">
+                            <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
+                            <input type="hidden" name="action" value="resync_ost">
+                            <input type="hidden" name="ost_ticket_id" value="<?= (int) $r['ticket_id'] ?>">
+                            <button type="submit" class="at-btn at-btn-sm">Sync now</button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
+
+        <h3 style="margin:14px 0 6px">ConnectWise &rarr; osTicket
+            <span class="at-count">(<?= count($u['connectwise']) ?>)</span>
+            <small class="at-muted">— matches your Import Filters (board / company / status)</small></h3>
+        <?php if (!empty($u['cw_error'])): ?>
+            <p class="at-err">ConnectWise query failed: <?= $e($u['cw_error']) ?></p>
+        <?php elseif (!$u['connectwise']): ?>
+            <p class="at-muted">Every filtered ConnectWise ticket is imported. 🎉</p>
+        <?php else: ?>
+        <table class="at-table">
+            <thead><tr><th>CW #</th><th>Summary</th><th>Board</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($u['connectwise'] as $r): ?>
+                <tr>
+                    <td><?= (int) $r['id'] ?></td>
+                    <td><?= $e(mb_strimwidth((string) $r['title'], 0, 60, '…')) ?></td>
+                    <td><?= $e($r['board']) ?></td>
+                    <td><?= $e($r['status']) ?></td>
+                    <td>
+                        <form method="post" class="at-inline">
+                            <input type="hidden" name="__CSRFToken__" value="<?= $e($csrfToken) ?>">
+                            <input type="hidden" name="action" value="import_one">
+                            <input type="hidden" name="at_ticket_id" value="<?= (int) $r['id'] ?>">
+                            <button type="submit" class="at-btn at-btn-sm">Import now</button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
+    </section>
+
     <!-- Failed jobs / retry queue ------------------------------------ -->
     <section class="at-box">
         <h2>Failed &amp; Dead Jobs</h2>
